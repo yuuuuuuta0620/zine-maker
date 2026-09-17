@@ -5,3 +5,7 @@
 
 # サンプル写真（実在の人物が写っており容量も大きいので追跡しない）
 Sample/
+
+# Xcode の個人設定
+*.xcuserdatad/
+xcuserdata/

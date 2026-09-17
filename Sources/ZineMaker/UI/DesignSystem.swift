@@ -158,3 +158,7 @@ struct CGImageView: View {
         }
     }
 }
+
+extension String {
+    var nilWhenEmpty: String? { isEmpty ? nil : self }
+}

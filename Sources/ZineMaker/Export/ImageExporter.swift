@@ -101,24 +101,24 @@ enum ImageExporter {
     // MARK: - 本体
 
     @discardableResult
-    static func export(board: Artboard, settings: DocSettings, assets: [UUID: PhotoAsset],
+    static func export(board: Artboard, settings: DocSettings, scene: CanvasRenderer.Scene,
                        to url: URL, options: Options = .init()) throws -> CGSize {
-        let image = try render(board: board, settings: settings, assets: assets, options: options)
+        let image = try render(board: board, settings: settings, scene: scene, options: options)
         try write(image, to: url, options: options)
         ImageStore.shared.purgeFullResolution()
         return CGSize(width: image.width, height: image.height)
     }
 
     /// 書き出しと同じ経路でプレビュー用の小さな画像を作る
-    static func preview(board: Artboard, settings: DocSettings, assets: [UUID: PhotoAsset],
+    static func preview(board: Artboard, settings: DocSettings, scene: CanvasRenderer.Scene,
                         options: Options, longEdge: CGFloat = 480) -> CGImage? {
         var o = options
         o.sizing = .longEdge(Double(longEdge))
-        return try? render(board: board, settings: settings, assets: assets,
+        return try? render(board: board, settings: settings, scene: scene,
                            options: o, quality: .screen(maxPixel: 1024))
     }
 
-    private static func render(board: Artboard, settings: DocSettings, assets: [UUID: PhotoAsset],
+    private static func render(board: Artboard, settings: DocSettings, scene: CanvasRenderer.Scene,
                                options: Options,
                                quality: CanvasRenderer.ImageQuality? = nil) throws -> CGImage {
         let source = options.includeBleed ? settings.mediaBox : settings.trimBox
@@ -151,7 +151,7 @@ enum ImageExporter {
 
         // 出力ピクセル数から実効 DPI を逆算して、必要な分だけデコードする
         let renderQuality = quality ?? .output(dpi: Double(scale * 72), jpegQuality: nil)
-        CanvasRenderer.draw(board, settings: settings, assets: assets, in: ctx,
+        CanvasRenderer.draw(board, settings: settings, scene: scene, in: ctx,
                             options: .init(guides: false, quality: renderQuality,
                                            drawBackground: opaque))
 

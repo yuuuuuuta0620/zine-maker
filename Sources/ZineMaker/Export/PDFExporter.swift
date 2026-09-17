@@ -39,12 +39,14 @@ enum PDFExporter {
         var errorDescription: String? { "PDF を作成できませんでした" }
     }
 
-    static func export(boards: [Artboard], settings: DocSettings, assets: [UUID: PhotoAsset],
-                       to url: URL, options: Options = .init()) throws {
+    static func export(context: DocumentContext, to url: URL, options: Options = .init()) throws {
+        let boards = context.boards
+        let settings = context.settings
+        let scenes = context.allScenes()
         var docBox = settings.mediaBox
         let info: [CFString: Any] = [
-            kCGPDFContextTitle: options.title,
-            kCGPDFContextAuthor: options.author,
+            kCGPDFContextTitle: context.meta.title.isEmpty ? options.title : context.meta.title,
+            kCGPDFContextAuthor: context.meta.author.isEmpty ? options.author : context.meta.author,
             kCGPDFContextCreator: "ZineMaker",
         ]
         guard let consumer = CGDataConsumer(url: url as CFURL),
@@ -59,9 +61,9 @@ enum PDFExporter {
 
         // 組写真ボードは1枚1ページ。塗り足しもトンボもない。
         guard settings.kind == .zine else {
-            for board in boards {
+            for (i, board) in boards.enumerated() {
                 ctx.beginPDFPage(pageInfo(media: settings.mediaBox, trim: nil, bleed: nil))
-                CanvasRenderer.draw(board, settings: settings, assets: assets, in: ctx, options: renderOptions)
+                CanvasRenderer.draw(board, settings: settings, scene: scenes[i], in: ctx, options: renderOptions)
                 ctx.endPDFPage()
             }
             ctx.closePDF()
@@ -69,14 +71,14 @@ enum PDFExporter {
             return
         }
 
-        for board in boards {
+        for (i, board) in boards.enumerated() {
             switch options.mode {
             case .spread:
                 // MediaBox = 塗り足し込み、TrimBox = 仕上がり。この2つが入稿の要。
                 ctx.beginPDFPage(pageInfo(media: settings.mediaBox,
                                           trim: options.printBoxes ? settings.trimBox : nil,
                                           bleed: options.printBoxes ? settings.mediaBox : nil))
-                CanvasRenderer.draw(board, settings: settings, assets: assets, in: ctx, options: renderOptions)
+                CanvasRenderer.draw(board, settings: settings, scene: scenes[i], in: ctx, options: renderOptions)
                 ctx.endPDFPage()
 
             case .singlePage:
@@ -93,7 +95,7 @@ enum PDFExporter {
                                               bleed: options.printBoxes ? localMedia : nil))
                     ctx.saveGState()
                     ctx.translateBy(x: -pageMedia.minX, y: -pageMedia.minY)
-                    CanvasRenderer.draw(board, settings: settings, assets: assets, in: ctx, options: renderOptions)
+                    CanvasRenderer.draw(board, settings: settings, scene: scenes[i], in: ctx, options: renderOptions)
                     ctx.restoreGState()
                     ctx.endPDFPage()
                 }

@@ -8,6 +8,8 @@ final class AppState: ObservableObject {
     static let shared = AppState()
 
     @Published var settings = DocSettings() { didSet { if settings != oldValue { dirty = true } } }
+    @Published var meta = DocumentMeta() { didSet { if meta != oldValue { dirty = true } } }
+    @Published var series: [Series] = []
     @Published var assets: [PhotoAsset] = []
     @Published var boards: [Artboard] = [Artboard()]
     @Published var currentIndex = 0
@@ -37,6 +39,20 @@ final class AppState: ObservableObject {
 
     var assetIndex: [UUID: PhotoAsset] {
         Dictionary(uniqueKeysWithValues: assets.map { ($0.id, $0) })
+    }
+
+    /// 作品番号・ページ番号・作品一覧を含む、ドキュメント全体を見た文脈
+    var documentContext: DocumentContext {
+        DocumentContext(settings: settings, meta: meta, series: series, assets: assets, boards: boards)
+    }
+
+    /// 現在のページを描くための文脈
+    var currentScene: CanvasRenderer.Scene {
+        documentContext.scene(forBoardAt: currentIndex)
+    }
+
+    func scene(forBoardAt index: Int) -> CanvasRenderer.Scene {
+        documentContext.scene(forBoardAt: index)
     }
 
     var currentBoard: Artboard {
@@ -73,7 +89,9 @@ final class AppState: ObservableObject {
 
     // MARK: - Undo
 
-    private var snapshot: ZineFile { ZineFile(settings: settings, assets: assets, boards: boards) }
+    private var snapshot: ZineFile {
+        ZineFile(settings: settings, meta: meta, series: series, assets: assets, boards: boards)
+    }
 
     /// 1操作の直前に一度だけ呼ぶ（ドラッグ中は呼ばない）
     func beginUndoGroup() {
@@ -96,6 +114,8 @@ final class AppState: ObservableObject {
 
     private func apply(_ file: ZineFile) {
         settings = file.settings
+        meta = file.meta
+        series = file.series
         assets = file.assets
         boards = file.boards.isEmpty ? [Artboard()] : file.boards
         currentIndex = min(currentIndex, boards.count - 1)
@@ -588,6 +608,133 @@ final class AppState: ObservableObject {
         currentBoard = board
     }
 
+    // MARK: - ポートフォリオ
+
+    /// 種別つきのページを追加する（表紙は先頭へ）
+    func addPortfolioPage(_ role: BoardRole, series seriesRef: Series? = nil) {
+        beginUndoGroup()
+        let coverPhoto = role == .cover ? (traySelection.first ?? assets.first?.id) : nil
+        let board = PortfolioPages.make(role, settings: settings, series: seriesRef, coverPhoto: coverPhoto)
+        if role == .cover {
+            boards.insert(board, at: 0)
+            currentIndex = 0
+        } else {
+            boards.insert(board, at: currentIndex + 1)
+            currentIndex += 1
+        }
+        selection.removeAll()
+        status = "「\(role.label)」を追加しました"
+    }
+
+    func setRole(_ role: BoardRole) {
+        beginUndoGroup()
+        currentBoard.role = role
+    }
+
+    /// 表紙・ステートメント・作品一覧・プロフィールをまとめて用意する
+    func scaffoldPortfolio() {
+        beginUndoGroup()
+        let cover = PortfolioPages.cover(settings: settings, withPhoto: traySelection.first ?? assets.first?.id)
+        let statement = PortfolioPages.statement(settings: settings)
+        let index = PortfolioPages.index(settings: settings)
+        let profile = PortfolioPages.profile(settings: settings)
+        boards.insert(contentsOf: [cover, statement], at: 0)
+        boards.append(contentsOf: [index, profile])
+        currentIndex = 0
+        selection.removeAll()
+        status = "表紙・ステートメント・作品一覧・プロフィールを追加しました"
+    }
+
+    // MARK: シリーズ
+
+    @discardableResult
+    func addSeries(title: String = "新しいシリーズ") -> Series {
+        beginUndoGroup()
+        let s = Series(title: title)
+        series.append(s)
+        dirty = true
+        return s
+    }
+
+    func renameSeries(_ id: UUID, title: String, subtitle: String) {
+        guard let i = series.firstIndex(where: { $0.id == id }) else { return }
+        beginUndoGroup()
+        series[i].title = title
+        series[i].subtitle = subtitle
+    }
+
+    func removeSeries(_ id: UUID) {
+        beginUndoGroup()
+        series.removeAll { $0.id == id }
+        for i in boards.indices where boards[i].seriesID == id { boards[i].seriesID = nil }
+    }
+
+    func assignCurrentBoard(to seriesID: UUID?) {
+        beginUndoGroup()
+        currentBoard.seriesID = seriesID
+    }
+
+    /// 現在のページ以降、次の中扉までを同じシリーズにまとめる
+    func assignFollowingBoards(to seriesID: UUID?) {
+        beginUndoGroup()
+        var i = currentIndex
+        while i < boards.count {
+            if i > currentIndex, boards[i].role == .divider { break }
+            boards[i].seriesID = seriesID
+            i += 1
+        }
+        status = "\(i - currentIndex) ページをまとめました"
+    }
+
+    // MARK: キャプション
+
+    /// 選択中（なければページ全体）の写真枠に、紐づいたキャプション枠を付ける
+    func addCaptions(template: String) {
+        beginUndoGroup()
+        let targets = selection.isEmpty
+            ? currentBoard.imageFrames.filter { $0.assetID != nil }
+            : selectedElements.compactMap(\.imageFrame).filter { $0.assetID != nil }
+        guard !targets.isEmpty else { status = "写真の入った枠がありません"; return }
+
+        var board = currentBoard
+        var added: Set<UUID> = []
+        for frame in targets {
+            // すでに同じ写真のキャプションがあるなら作り直さない
+            if board.elements.contains(where: { $0.textFrame?.linkedAssetID == frame.assetID && $0.textFrame?.isDynamic == true }) {
+                continue
+            }
+            let caption = PortfolioPages.caption(for: frame, settings: settings, template: template)
+            added.insert(caption.id)
+            board.elements.append(.text(caption))
+        }
+        currentBoard = board
+        selection = added
+        status = added.isEmpty ? "すでにキャプションが付いています" : "\(added.count) 枚にキャプションを付けました"
+    }
+
+    /// テキスト枠を写真に紐づけて差し込みにする
+    func linkCaption(textID: UUID, to assetID: UUID?, template: String?) {
+        beginUndoGroup()
+        update(id: textID) {
+            if case .text(var f) = $0 {
+                f.linkedAssetID = assetID
+                f.template = template
+                $0 = .text(f)
+            }
+        }
+    }
+
+    /// 差し込みをやめて、いま出ている文面をそのまま固定する
+    func freezeCaption(textID: UUID) {
+        guard let element = currentBoard.elements.first(where: { $0.id == textID }),
+              let frame = element.textFrame else { return }
+        let resolved = CanvasRenderer.resolvedText(for: frame, scene: currentScene)
+        beginUndoGroup()
+        update(id: textID) {
+            if case .text(var f) = $0 { f.text = resolved; f.template = nil; $0 = .text(f) }
+        }
+    }
+
     // MARK: - モード切り替え
 
     func switchKind(to kind: DocKind) {
@@ -653,6 +800,8 @@ final class AppState: ObservableObject {
         let file = try JSONDecoder().decode(ZineFile.self, from: Data(contentsOf: url))
         undoStack.removeAll(); redoStack.removeAll()
         settings = file.settings
+        meta = file.meta
+        series = file.series
         assets = file.assets
         boards = file.boards.isEmpty ? [Artboard()] : file.boards
         currentIndex = 0
@@ -670,6 +819,8 @@ final class AppState: ObservableObject {
         s.kind = kind
         if kind == .board { s.background = .white }
         settings = s
+        meta = DocumentMeta()
+        series = []
         assets = []
         boards = [Artboard()]
         currentIndex = 0

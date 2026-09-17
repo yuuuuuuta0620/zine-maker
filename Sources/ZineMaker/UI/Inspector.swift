@@ -6,9 +6,13 @@ struct Inspector: View {
     @State private var tab: Tab = .document
 
     enum Tab: String, CaseIterable, Identifiable {
-        case document, selection
+        case document, page, selection
         var id: String { rawValue }
-        var label: String { self == .document ? "ドキュメント" : "選択中" }
+        var label: String {
+            switch self {
+            case .document: "作品集"; case .page: "ページ"; case .selection: "選択中"
+            }
+        }
     }
 
     var body: some View {
@@ -26,6 +30,7 @@ struct Inspector: View {
                 VStack(alignment: .leading, spacing: DS.sectionGap) {
                     switch tab {
                     case .document:  DocumentPanel(state: state)
+                    case .page:      PagePanel(state: state)
                     case .selection: SelectionPanel(state: state)
                     }
                 }
@@ -63,6 +68,9 @@ private struct DocumentPanel: View {
             if state.settings.kind == .zine { zineSection } else { boardSection }
 
             gridSection
+
+            PortfolioMetaSection(state: state)
+            SeriesSection(state: state)
 
             VStack(alignment: .leading, spacing: 8) {
                 SectionHeader("地色", icon: "paintpalette")
@@ -554,12 +562,14 @@ private struct TextPanel: View {
                 }))
                 .font(.system(size: 12))
                 .frame(height: 96)
+                .disabled(frame.isDynamic)
+                .opacity(frame.isDynamic ? 0.5 : 1)
                 .scrollContentBackground(.hidden)
                 .padding(4)
                 .background(RoundedRectangle(cornerRadius: 5).fill(.background))
                 .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(.secondary.opacity(0.3)))
 
-            if CanvasRenderer.textOverflows(frame) {
+            if CanvasRenderer.textOverflows(frame, scene: state.currentScene) {
                 Label("枠に収まっていません", systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: 10)).foregroundStyle(.orange)
             }
@@ -588,6 +598,9 @@ private struct TextPanel: View {
                 Toggle("縦組み", isOn: bind(\.vertical)).font(.system(size: 11)).toggleStyle(.checkbox)
             }
 
+            Divider()
+            captionSection
+
             ColorPicker("文字色", selection: Binding(
                 get: { Color(nsColor: NSColor(cgColor: frame.color.cgColor) ?? .black) },
                 set: { newValue in
@@ -598,6 +611,63 @@ private struct TextPanel: View {
                 }))
                 .font(.system(size: 11))
         }
+    }
+
+    /// 写真へ紐づけて差し込みにする
+    @ViewBuilder
+    private var captionSection: some View {
+        SectionHeader("写真から差し込む", icon: "text.below.photo")
+
+        Toggle("写真に紐づける", isOn: Binding(
+            get: { frame.isDynamic },
+            set: { on in
+                if on {
+                    let nearest = nearestImageAsset()
+                    state.linkCaption(textID: frame.id, to: nearest,
+                                      template: frame.template ?? CaptionTemplate.presets[1].template)
+                } else {
+                    state.freezeCaption(textID: frame.id)
+                }
+            }))
+            .font(.system(size: 11))
+
+        if frame.isDynamic {
+            Picker("元にする写真", selection: Binding(
+                get: { frame.linkedAssetID },
+                set: { state.linkCaption(textID: frame.id, to: $0, template: frame.template) })) {
+                    Text("写真なし（作品集の情報だけ）").tag(UUID?.none)
+                    ForEach(state.assets) { Text($0.name).tag(UUID?.some($0.id)) }
+                }
+                .font(.system(size: 11))
+
+            CaptionTemplateField(template: Binding(
+                get: { frame.template ?? "" },
+                set: { state.linkCaption(textID: frame.id, to: frame.linkedAssetID, template: $0) }))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("いまの表示").font(.system(size: 10)).foregroundStyle(.secondary)
+                Text(CanvasRenderer.resolvedText(for: frame, scene: state.currentScene))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(6)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.4)))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button("この文面で固定する") { state.freezeCaption(textID: frame.id) }
+                .controlSize(.small)
+        }
+    }
+
+    /// この枠のすぐ上にある写真を、キャプションの相手として選ぶ
+    private func nearestImageAsset() -> UUID? {
+        let mine = frame.rect
+        let candidates = state.currentBoard.imageFrames.filter { $0.assetID != nil }
+        let above = candidates
+            .filter { $0.rect.minY >= mine.midY && abs($0.rect.midX - mine.midX) < max(mine.width, $0.rect.width) }
+            .min { $0.rect.minY < $1.rect.minY }
+        return (above ?? candidates.min { abs($0.rect.midY - mine.midY) < abs($1.rect.midY - mine.midY) })?.assetID
     }
 
     private func bind<T>(_ keyPath: WritableKeyPath<TextFrame, T>) -> Binding<T> {

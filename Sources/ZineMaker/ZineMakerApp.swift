@@ -72,6 +72,24 @@ struct ZineMakerApp: App {
             Button("余白に合わせる") { state.fitToMargins() }
         }
 
+        CommandMenu("ポートフォリオ") {
+            Button("一式そろえる（表紙・ステートメント・一覧・プロフィール）") { state.scaffoldPortfolio() }
+            Divider()
+            ForEach(BoardRole.allCases.filter { $0 != .content }) { role in
+                Button("\(role.label)を追加") { state.addPortfolioPage(role) }
+            }
+            Divider()
+            Button("シリーズを追加") { state.addSeries() }
+            Divider()
+            Button("写真にキャプションを付ける") {
+                state.addCaptions(template: CaptionTemplate.presets[1].template)
+            }
+            .keyboardShortcut("k")
+            Button("撮影データのキャプションを付ける") {
+                state.addCaptions(template: "{exposure}")
+            }
+        }
+
         CommandMenu("表示") {
             Toggle("定規", isOn: Binding(get: { state.showRulers }, set: { state.showRulers = $0 }))
                 .keyboardShortcut("r", modifiers: [.command, .option])

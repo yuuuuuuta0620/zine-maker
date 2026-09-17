@@ -207,6 +207,74 @@ struct DocSettings: Codable, Equatable {
     }
 }
 
+// MARK: - ポートフォリオ
+
+/// 作品集全体の情報。表紙やプロフィールページに差し込む。
+struct DocumentMeta: Codable, Equatable {
+    var title = ""
+    var subtitle = ""
+    var author = ""
+    var email = ""
+    var website = ""
+    var phone = ""
+    var statement = ""
+    var year = ""
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title     = c.value(.title, "")
+        subtitle  = c.value(.subtitle, "")
+        author    = c.value(.author, "")
+        email     = c.value(.email, "")
+        website   = c.value(.website, "")
+        phone     = c.value(.phone, "")
+        statement = c.value(.statement, "")
+        year      = c.value(.year, "")
+    }
+}
+
+/// 作品のまとまり（章）
+struct Series: Codable, Identifiable, Equatable, Hashable {
+    var id = UUID()
+    var title = ""
+    var subtitle = ""
+
+    init(title: String = "", subtitle: String = "") {
+        self.title = title
+        self.subtitle = subtitle
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id       = c.value(.id, UUID())
+        title    = c.value(.title, "")
+        subtitle = c.value(.subtitle, "")
+    }
+}
+
+/// ページの役割。作品ページ以外は通し番号から外す。
+enum BoardRole: String, Codable, CaseIterable, Identifiable {
+    case content, cover, statement, profile, index, divider
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .content: "作品"; case .cover: "表紙"; case .statement: "ステートメント"
+        case .profile: "プロフィール"; case .index: "作品一覧"; case .divider: "中扉"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .content: "photo"; case .cover: "book.closed"; case .statement: "text.quote"
+        case .profile: "person.crop.square"; case .index: "list.number"; case .divider: "rectangle.split.1x2"
+        }
+    }
+    /// 作品番号を振る対象か
+    var countsAsPlate: Bool { self == .content }
+}
+
 // MARK: - 写真アセット
 
 /// ドキュメントが抱える写真。トレイに並び、フレームから ID で参照される。
@@ -296,6 +364,13 @@ struct TextFrame: Codable, Identifiable, Equatable {
     var vertical: Bool = false
     var color: RGBA = .ink
 
+    /// 差し込みの元になる写真。テンプレートと組で使う。
+    var linkedAssetID: UUID?
+    /// `{plate}` のような記号を含む差し込み文。nil なら `text` をそのまま出す。
+    var template: String?
+
+    var isDynamic: Bool { template?.isEmpty == false }
+
     init(rect: CGRect) { self.rect = rect }
 
     init(from decoder: Decoder) throws {
@@ -314,6 +389,8 @@ struct TextFrame: Codable, Identifiable, Equatable {
         alignment       = c.value(.alignment, .left)
         vertical        = c.value(.vertical, false)
         color           = c.value(.color, .ink)
+        linkedAssetID   = c.value(.linkedAssetID, UUID?.none)
+        template        = c.value(.template, String?.none)
     }
 }
 
@@ -453,15 +530,22 @@ enum Element: Codable, Identifiable, Equatable {
 struct Artboard: Codable, Identifiable, Equatable {
     var id = UUID()
     var elements: [Element] = []
+    var role: BoardRole = .content
+    var seriesID: UUID?
+    /// 中扉などに使う見出し
+    var title: String = ""
 
     var imageFrames: [ImageFrame] { elements.compactMap(\.imageFrame) }
 
-    init() {}
+    init(role: BoardRole = .content) { self.role = role }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = c.value(.id, UUID())
+        id       = c.value(.id, UUID())
         elements = c.value(.elements, [])
+        role     = c.value(.role, .content)
+        seriesID = c.value(.seriesID, UUID?.none)
+        title    = c.value(.title, "")
     }
 }
 
@@ -469,20 +553,25 @@ struct Artboard: Codable, Identifiable, Equatable {
 
 struct ZineFile: Codable {
     /// 保存形式のバージョン。読み込みは常に前方互換で、足りないキーは初期値に落ちる。
-    static let currentVersion = 2
+    static let currentVersion = 3
 
     var version: Int = ZineFile.currentVersion
     var settings: DocSettings
+    var meta = DocumentMeta()
+    var series: [Series] = []
     var assets: [PhotoAsset] = []
     var boards: [Artboard]
 
     enum CodingKeys: String, CodingKey {
-        case version, settings, assets, boards
+        case version, settings, meta, series, assets, boards
         case spreads   // v1 では見開きを spreads と呼んでいた
     }
 
-    init(settings: DocSettings, assets: [PhotoAsset], boards: [Artboard]) {
+    init(settings: DocSettings, meta: DocumentMeta = DocumentMeta(), series: [Series] = [],
+         assets: [PhotoAsset], boards: [Artboard]) {
         self.settings = settings
+        self.meta = meta
+        self.series = series
         self.assets = assets
         self.boards = boards
     }
@@ -491,6 +580,8 @@ struct ZineFile: Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         version  = c.value(.version, 1)
         settings = c.value(.settings, DocSettings())
+        meta     = c.value(.meta, DocumentMeta())
+        series   = c.value(.series, [])
         assets   = c.value(.assets, [])
         let boardsValue: [Artboard]? = c.value(.boards, [Artboard]?.none)
         boards   = boardsValue ?? c.value(.spreads, [Artboard()])
@@ -501,6 +592,8 @@ struct ZineFile: Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(ZineFile.currentVersion, forKey: .version)
         try c.encode(settings, forKey: .settings)
+        try c.encode(meta, forKey: .meta)
+        try c.encode(series, forKey: .series)
         try c.encode(assets, forKey: .assets)
         try c.encode(boards, forKey: .boards)
     }

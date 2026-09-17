@@ -47,8 +47,7 @@ extension AppState {
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
         runExport { [self] in
-            try PDFExporter.export(boards: boards, settings: settings, assets: assetIndex,
-                                   to: url, options: options)
+            try PDFExporter.export(context: documentContext, to: url, options: options)
             let pages = PDFExporter.pageCount(boards: boards.count, settings: settings, mode: options.mode)
             return "\(pages) ページのPDFを書き出しました: \(url.lastPathComponent)"
         }
@@ -67,22 +66,24 @@ extension AppState {
         runExport { [self] in
             if allBoards {
                 let stem = url.deletingPathExtension()
+                let scenes = documentContext.allScenes()
                 for (i, board) in boards.enumerated() {
                     let each = URL(fileURLWithPath: String(format: "%@-%02d.%@", stem.path, i + 1, options.format.ext))
-                    try ImageExporter.export(board: board, settings: settings, assets: assetIndex,
+                    try ImageExporter.export(board: board, settings: settings, scene: scenes[i],
                                              to: each, options: options)
                 }
                 return "\(boards.count) 枚を書き出しました: \(url.deletingLastPathComponent().lastPathComponent)/"
             } else {
                 let size = try ImageExporter.export(board: currentBoard, settings: settings,
-                                                    assets: assetIndex, to: url, options: options)
+                                                    scene: currentScene, to: url, options: options)
                 return "\(Int(size.width))×\(Int(size.height)) px で書き出しました: \(url.lastPathComponent)"
             }
         }
     }
 
     private var defaultName: String {
-        fileURL?.deletingPathExtension().lastPathComponent
+        if !meta.title.isEmpty { return meta.title }
+        return fileURL?.deletingPathExtension().lastPathComponent
             ?? (settings.kind == .zine ? "zine" : "layout")
     }
 

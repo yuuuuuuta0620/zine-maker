@@ -16,6 +16,17 @@ enum CanvasRenderer {
         case output(dpi: Double, jpegQuality: Double?)
     }
 
+    /// 描画に必要な周辺情報。写真の実体と、差し込みキャプションの文脈。
+    struct Scene {
+        var assets: [UUID: PhotoAsset] = [:]
+        var caption = CaptionTemplate.Context()
+
+        init(assets: [UUID: PhotoAsset] = [:], caption: CaptionTemplate.Context = .init()) {
+            self.assets = assets
+            self.caption = caption
+        }
+    }
+
     struct Options {
         /// 仕上がり線・塗り足し・余白ガイドを描く（画面のみ true）
         var guides = false
@@ -34,6 +45,12 @@ enum CanvasRenderer {
 
     static func draw(_ board: Artboard, settings: DocSettings, assets: [UUID: PhotoAsset],
                      in ctx: CGContext, options: Options = .init()) {
+        draw(board, settings: settings, scene: Scene(assets: assets), in: ctx, options: options)
+    }
+
+    static func draw(_ board: Artboard, settings: DocSettings, scene: Scene,
+                     in ctx: CGContext, options: Options = .init()) {
+        let assets = scene.assets
         ctx.saveGState()
         if options.drawBackground {
             ctx.setFillColor(settings.background.cgColor)
@@ -48,7 +65,7 @@ enum CanvasRenderer {
             if element.rotation != 0 { ctx.concatenate(element.transform) }
             switch element {
             case .image(let frame): drawImage(frame, assets: assets, in: ctx, options: options)
-            case .text(let frame):  drawText(frame, in: ctx)
+            case .text(let frame):  drawText(frame, in: ctx, scene: scene)
             }
             ctx.restoreGState()
         }
@@ -173,7 +190,18 @@ enum CanvasRenderer {
 
     /// 組版は Core Text に任せる。禁則処理・縦組みが標準で効き、
     /// 画面と PDF が同じエンジンを通るので行位置が一致する。
-    static func attributedString(for frame: TextFrame) -> NSAttributedString {
+    /// 差し込みテンプレートが入っていれば、写真の撮影情報などを埋めた文面を返す。
+    static func resolvedText(for frame: TextFrame, scene: Scene) -> String {
+        guard let template = frame.template, !template.isEmpty else { return frame.text }
+        let asset = frame.linkedAssetID.flatMap { scene.assets[$0] }
+        return CaptionTemplate.render(template, asset: asset, context: scene.caption)
+    }
+
+    static func attributedString(for frame: TextFrame, scene: Scene = .init()) -> NSAttributedString {
+        attributedString(for: frame, text: resolvedText(for: frame, scene: scene))
+    }
+
+    static func attributedString(for frame: TextFrame, text: String) -> NSAttributedString {
         let font = CTFontCreateWithName(frame.fontName as CFString, frame.fontSize, nil)
         let style = makeParagraphStyle(alignment: frame.alignment,
                                        lineHeight: frame.fontSize * frame.lineHeightScale)
@@ -189,7 +217,7 @@ enum CanvasRenderer {
         if frame.vertical {
             attrs[NSAttributedString.Key(kCTVerticalFormsAttributeName as String)] = true
         }
-        return NSAttributedString(string: frame.text, attributes: attrs)
+        return NSAttributedString(string: text, attributes: attrs)
     }
 
     private static func makeParagraphStyle(alignment: TextAlign, lineHeight: CGFloat) -> CTParagraphStyle {
@@ -221,9 +249,10 @@ enum CanvasRenderer {
         }
     }
 
-    static func drawText(_ frame: TextFrame, in ctx: CGContext) {
-        guard !frame.text.isEmpty else { return }
-        let framesetter = CTFramesetterCreateWithAttributedString(attributedString(for: frame))
+    static func drawText(_ frame: TextFrame, in ctx: CGContext, scene: Scene = .init()) {
+        let text = resolvedText(for: frame, scene: scene)
+        guard !text.isEmpty else { return }
+        let framesetter = CTFramesetterCreateWithAttributedString(attributedString(for: frame, text: text))
         let path = CGPath(rect: frame.rect, transform: nil)
 
         var frameAttrs: [CFString: Any] = [:]
@@ -239,16 +268,17 @@ enum CanvasRenderer {
     }
 
     /// テキストが枠に収まりきらないか（あふれ表示に使う）
-    static func textOverflows(_ frame: TextFrame) -> Bool {
-        guard !frame.text.isEmpty else { return false }
-        let framesetter = CTFramesetterCreateWithAttributedString(attributedString(for: frame))
+    static func textOverflows(_ frame: TextFrame, scene: Scene = .init()) -> Bool {
+        let text = resolvedText(for: frame, scene: scene)
+        guard !text.isEmpty else { return false }
+        let framesetter = CTFramesetterCreateWithAttributedString(attributedString(for: frame, text: text))
         let path = CGPath(rect: frame.rect, transform: nil)
         var attrs: [CFString: Any] = [:]
         if frame.vertical { attrs[kCTFrameProgressionAttributeName] = CTFrameProgression.rightToLeft.rawValue }
         let ctFrame = CTFramesetterCreateFrame(framesetter, CFRangeMake(0, 0), path,
                                                attrs.isEmpty ? nil : attrs as CFDictionary)
         let visible = CTFrameGetVisibleStringRange(ctFrame)
-        return visible.length < (frame.text as NSString).length
+        return visible.length < (text as NSString).length
     }
 
     // MARK: - ガイド（画面のみ／書き出しには出ない）
@@ -310,6 +340,13 @@ enum CanvasRenderer {
     static func rasterize(_ board: Artboard, settings: DocSettings, assets: [UUID: PhotoAsset],
                           longEdge: CGFloat, includeBleed: Bool = false,
                           quality: ImageQuality = .screen(maxPixel: 512)) -> CGImage? {
+        rasterize(board, settings: settings, scene: Scene(assets: assets),
+                  longEdge: longEdge, includeBleed: includeBleed, quality: quality)
+    }
+
+    static func rasterize(_ board: Artboard, settings: DocSettings, scene: Scene,
+                          longEdge: CGFloat, includeBleed: Bool = false,
+                          quality: ImageQuality = .screen(maxPixel: 512)) -> CGImage? {
         let source = includeBleed ? settings.mediaBox : settings.trimBox
         guard source.width > 0, source.height > 0 else { return nil }
         let scale = longEdge / max(source.width, source.height)
@@ -322,7 +359,7 @@ enum CanvasRenderer {
         ctx.scaleBy(x: scale, y: scale)
         ctx.translateBy(x: -source.minX, y: -source.minY)
         ctx.clip(to: source)
-        draw(board, settings: settings, assets: assets, in: ctx,
+        draw(board, settings: settings, scene: scene, in: ctx,
              options: .init(guides: false, quality: quality))
         return ctx.makeImage()
     }

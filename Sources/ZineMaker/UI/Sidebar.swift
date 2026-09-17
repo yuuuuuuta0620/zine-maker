@@ -72,6 +72,7 @@ private struct BoardRow: View {
     let tick: Int
 
     private var label: String {
+        if board.role != .content { return board.role.label }
         if state.settings.kind == .zine {
             let per = state.settings.pagesPerSpread
             let first = index * per + 1
@@ -80,9 +81,14 @@ private struct BoardRow: View {
         return "\(index + 1)"
     }
 
+    private var seriesTitle: String? {
+        guard let id = board.seriesID else { return nil }
+        return state.series.first { $0.id == id }?.title.nilWhenEmpty
+    }
+
     var body: some View {
         let thumb = CanvasRenderer.rasterize(board, settings: state.settings,
-                                             assets: state.assetIndex, longEdge: 180,
+                                             scene: state.scene(forBoardAt: index), longEdge: 180,
                                              quality: .screen(maxPixel: 320))
         VStack(spacing: 4) {
             CGImageView(image: thumb)
@@ -91,7 +97,11 @@ private struct BoardRow: View {
                 .clipShape(RoundedRectangle(cornerRadius: 3))
                 .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(.black.opacity(0.18), lineWidth: 0.5))
                 .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
-            HStack(spacing: 4) {
+            HStack(spacing: 3) {
+                if board.role != .content {
+                    Image(systemName: board.role.icon).font(.system(size: 8))
+                        .foregroundStyle(.tint)
+                }
                 Text(label).font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary)
                 let empties = board.imageFrames.filter { $0.assetID == nil }.count
                 if empties > 0 {
@@ -101,9 +111,31 @@ private struct BoardRow: View {
                         .help("空の枠が \(empties) 個")
                 }
             }
+            if let seriesTitle {
+                Text(seriesTitle)
+                    .font(.system(size: 8))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
         }
         .padding(.vertical, 3)
         .contextMenu {
+            Menu("ページの種別") {
+                ForEach(BoardRole.allCases) { role in
+                    Button(role.label) { state.currentIndex = index; state.setRole(role) }
+                }
+            }
+            if !state.series.isEmpty {
+                Menu("シリーズ") {
+                    Button("なし") { state.currentIndex = index; state.assignCurrentBoard(to: nil) }
+                    ForEach(state.series) { s in
+                        Button(s.title.isEmpty ? "（無題）" : s.title) {
+                            state.currentIndex = index; state.assignCurrentBoard(to: s.id)
+                        }
+                    }
+                }
+            }
+            Divider()
             Button("複製") { state.currentIndex = index; state.duplicateBoard() }
             Button("削除", role: .destructive) { state.currentIndex = index; state.deleteCurrentBoard() }
         }

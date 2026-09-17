@@ -231,7 +231,7 @@ struct ExportSheet: View {
                 .padding(.horizontal, 14).padding(.top, 14)
 
             let preview = ImageExporter.preview(board: state.currentBoard, settings: state.settings,
-                                                assets: state.assetIndex, options: imageOptions)
+                                                scene: state.currentScene, options: imageOptions)
             CGImageView(image: preview)
                 .frame(maxWidth: .infinity, maxHeight: 260)
                 .padding(.horizontal, 14)

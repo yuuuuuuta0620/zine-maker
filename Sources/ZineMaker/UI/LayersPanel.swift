@@ -52,7 +52,9 @@ struct LayersPanel: View {
             return "空の写真枠"
         }
         if let text = element.textFrame {
-            let firstLine = text.text.split(separator: "\n").first.map(String.init) ?? ""
+            // 差し込みは記号のままでは何か分からないので、実際に出る文面を見せる
+            let resolved = CanvasRenderer.resolvedText(for: text, scene: state.currentScene)
+            let firstLine = resolved.split(separator: "\n").first.map(String.init) ?? ""
             return firstLine.isEmpty ? "テキスト" : String(firstLine.prefix(18))
         }
         return element.typeLabel
@@ -84,6 +86,12 @@ struct LayersPanel: View {
 
             Spacer(minLength: 2)
 
+            if element.textFrame?.isDynamic == true {
+                Image(systemName: "link")
+                    .font(.system(size: 8))
+                    .foregroundStyle(selected ? Color.white.opacity(0.8) : Color.secondary)
+                    .help("写真に紐づいた差し込み")
+            }
             if element.rotation != 0 {
                 Text("\(Int(element.rotation))°")
                     .font(.system(size: 9).monospacedDigit())

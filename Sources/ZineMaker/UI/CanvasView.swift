@@ -153,7 +153,7 @@ final class CanvasView: NSView {
         ctx.fill(settings.mediaBox)
         ctx.setShadow(offset: .zero, blur: 0, color: nil)
 
-        CanvasRenderer.draw(state.currentBoard, settings: settings, assets: state.assetIndex, in: ctx,
+        CanvasRenderer.draw(state.currentBoard, settings: settings, scene: state.currentScene, in: ctx,
                             options: .init(guides: true,
                                            showColumns: state.showColumns,
                                            showCustomGuides: state.showCustomGuides,
@@ -290,7 +290,7 @@ final class CanvasView: NSView {
             ctx.addPath(path)
             ctx.strokePath()
 
-            if let text = element.textFrame, CanvasRenderer.textOverflows(text) {
+            if let text = element.textFrame, CanvasRenderer.textOverflows(text, scene: state.currentScene) {
                 ctx.setStrokeColor(CGColor(srgbRed: 0.95, green: 0.3, blue: 0.25, alpha: 1))
                 ctx.setLineWidth(2.5)
                 ctx.addPath(path)

@@ -49,13 +49,28 @@
 
 ## ビルドと起動
 
+ソースは1か所（`Sources/ZineMaker/`）にあり、2通りでビルドできる。
+
 ```bash
+# 配布用・署名あり（Xcode プロジェクト）
+xcodebuild -project zine-maker.xcodeproj -scheme ZineMaker -configuration Release build
+
+# 手早い確認用（SwiftPM）
 ./Scripts/bundle.sh release && open .build/ZineMaker.app
 ```
 
+`zine-maker.xcodeproj` は `Sources/ZineMaker` と `Resources` を同期フォルダとして参照している
+（`PBXFileSystemSynchronizedRootGroup`）ので、ファイルを足してもプロジェクトの編集は要らない。
+`Resources/Info.plist` は両方のビルドで共有している。
+
 `swift build` だけでも実行ファイルはできるが、NSOpenPanel とウィンドウのアクティベーションに
-Info.plist が要るため、通常は `bundle.sh` で .app に包んで起動する。
-Xcode で `Package.swift` を直接開いても動く。
+Info.plist が要るため、CLI からは `bundle.sh` で .app に包んで起動する。
+
+### 配布についての注意
+
+App Sandbox は**切ってある**。サンドボックス下では、保存した `.zine` を開き直したときに
+写真の絶対パスへアクセスできず、全部「写真なし」になるため。
+App Store に出すなら、先に `PhotoAsset` へ security-scoped bookmark を持たせる必要がある。
 
 ## 操作
 

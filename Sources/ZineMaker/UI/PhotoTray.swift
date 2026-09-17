@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import SwiftUI
 
 /// 下部の写真トレイ。取り込んだ写真がここに並び、キャンバスへドラッグして配置する。

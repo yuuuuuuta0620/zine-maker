@@ -1,6 +1,9 @@
 #!/bin/bash
-# SwiftPM の実行ファイルを .app バンドルに包む。
-# Info.plist がないと NSOpenPanel やアクティベーションが正しく動かないため必須。
+# SwiftPM の実行ファイルを .app バンドルに包む（CLI からの素早い確認用）。
+# Info.plist は Xcode ビルドと共有している Resources/Info.plist を使う。
+#
+# 配布用の署名済みビルドは Xcode 側で作る:
+#   xcodebuild -project zine-maker.xcodeproj -scheme ZineMaker -configuration Release build
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -12,33 +15,14 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp ".build/$CONFIG/ZineMaker" "$APP/Contents/MacOS/ZineMaker"
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleName</key><string>ZineMaker</string>
-  <key>CFBundleDisplayName</key><string>ZineMaker</string>
-  <key>CFBundleIdentifier</key><string>com.zinemaker.app</string>
-  <key>CFBundleExecutable</key><string>ZineMaker</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
-  <key>NSHighResolutionCapable</key><true/>
-  <key>NSHumanReadableCopyright</key><string>MIT License</string>
-  <key>CFBundleDocumentTypes</key>
-  <array>
-    <dict>
-      <key>CFBundleTypeName</key><string>ZineMaker Document</string>
-      <key>CFBundleTypeExtensions</key><array><string>zine</string></array>
-      <key>CFBundleTypeRole</key><string>Editor</string>
-      <key>LSHandlerRank</key><string>Owner</string>
-    </dict>
-  </array>
-</dict>
-</plist>
-PLIST
+# Xcode のビルド変数を埋めて Info.plist を作る
+sed -e 's|$(EXECUTABLE_NAME)|ZineMaker|g' \
+    -e 's|$(PRODUCT_BUNDLE_IDENTIFIER)|com.zinemaker.app|g' \
+    -e 's|$(MARKETING_VERSION)|0.1.0|g' \
+    -e 's|$(CURRENT_PROJECT_VERSION)|1|g' \
+    -e 's|$(MACOSX_DEPLOYMENT_TARGET)|14.0|g' \
+    Resources/Info.plist > "$APP/Contents/Info.plist"
+plutil -lint "$APP/Contents/Info.plist" > /dev/null
 
 codesign --force --deep --sign - "$APP" 2>/dev/null || true
 echo "built: $APP"

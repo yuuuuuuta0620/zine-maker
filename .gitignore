@@ -1,0 +1,7 @@
+*.xcuserdatad
+.DS_Store
+.build/
+.swiftpm/
+
+# サンプル写真（実在の人物が写っており容量も大きいので追跡しない）
+Sample/

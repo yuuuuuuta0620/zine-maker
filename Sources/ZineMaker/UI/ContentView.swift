@@ -1,0 +1,156 @@
+import AppKit
+import SwiftUI
+
+struct ContentView: View {
+    @ObservedObject var state: AppState
+    @State private var showingExport = false
+    @State private var showingTemplates = false
+
+    var body: some View {
+        NavigationSplitView {
+            Sidebar(state: state)
+                .navigationSplitViewColumnWidth(min: 150, ideal: 168, max: 240)
+        } detail: {
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    CanvasContainer(state: state)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    Divider()
+                    PhotoTray(state: state)
+                }
+                Divider()
+                Inspector(state: state)
+            }
+        }
+        .toolbar { toolbarItems }
+        .sheet(isPresented: $showingExport) { ExportSheet(state: state) }
+        .sheet(isPresented: $showingTemplates) { TemplatePicker(state: state) }
+        .safeAreaInset(edge: .bottom) { statusBar }
+        .onReceive(NotificationCenter.default.publisher(for: .zineShowExport)) { _ in showingExport = true }
+        .onReceive(NotificationCenter.default.publisher(for: .zineShowTemplates)) { _ in showingTemplates = true }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarItems: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigation) {
+            Picker("", selection: Binding(
+                get: { state.settings.kind },
+                set: { state.switchKind(to: $0) })) {
+                    ForEach(DocKind.allCases) { kind in
+                        Label(kind.label, systemImage: kind.icon).tag(kind)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .help("ZINE（冊子）と組写真（SNS）を切り替えます")
+        }
+
+        ToolbarItemGroup {
+            Button { state.presentImportPhotos() } label: {
+                Label("写真を追加", systemImage: "photo.badge.plus")
+            }
+            .help("写真をトレイに取り込む（⌘I）")
+
+            Button { showingTemplates = true } label: {
+                Label("レイアウト", systemImage: "square.grid.3x3")
+            }
+            .help("レイアウトを選んで一括配置（⌘L）")
+
+            Button { state.addTextFrame() } label: {
+                Label("テキスト", systemImage: "textformat")
+            }
+            .help("テキストを追加（⌘T）")
+
+            Spacer()
+
+            Button { state.undo() } label: { Label("取り消す", systemImage: "arrow.uturn.backward") }
+                .disabled(!state.canUndo)
+            Button { state.redo() } label: { Label("やり直す", systemImage: "arrow.uturn.forward") }
+                .disabled(!state.canRedo)
+
+            Spacer()
+
+            Button { showingExport = true } label: {
+                Label("書き出し", systemImage: "square.and.arrow.up")
+            }
+            .help("PDF・JPEG・PNG・AVIF などで書き出す（⌘E）")
+        }
+    }
+
+    private var statusBar: some View {
+        HStack(spacing: 10) {
+            if state.dirty {
+                Circle().fill(.orange).frame(width: 6, height: 6)
+            }
+            Text(state.status.isEmpty
+                 ? (state.fileURL?.lastPathComponent ?? "未保存のドキュメント")
+                 : state.status)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer()
+            if !state.selection.isEmpty {
+                Text("\(state.selection.count) 個選択")
+                    .font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary)
+            }
+            Text(state.settings.displaySize)
+                .font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
+            Text("\(state.settings.kind.unitLabel) \(state.currentIndex + 1) / \(state.boards.count)")
+                .font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(.bar)
+    }
+}
+
+// MARK: - キャンバス＋ズーム操作
+
+struct CanvasContainer: View {
+    @ObservedObject var state: AppState
+    @State private var canvas: CanvasView?
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            CanvasRepresentable(state: state) { canvas = $0 }
+            zoomControls.padding(12)
+        }
+    }
+
+    private var zoomControls: some View {
+        HStack(spacing: 2) {
+            Button { canvas?.zoomOut() } label: { Image(systemName: "minus.magnifyingglass") }
+            Button { canvas?.fitToView() } label: { Image(systemName: "arrow.up.left.and.down.right.magnifyingglass") }
+                .help("全体表示（⌘0）")
+            Button { canvas?.zoomActual() } label: { Text("100%").font(.system(size: 10)) }
+            Button { canvas?.zoomIn() } label: { Image(systemName: "plus.magnifyingglass") }
+        }
+        .buttonStyle(.borderless)
+        .controlSize(.small)
+        .padding(5)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7))
+        .shadow(color: .black.opacity(0.2), radius: 3, y: 1)
+    }
+}
+
+struct CanvasRepresentable: NSViewRepresentable {
+    @ObservedObject var state: AppState
+    var onMake: (CanvasView) -> Void
+
+    func makeNSView(context: Context) -> CanvasView {
+        let view = CanvasView()
+        view.state = state
+        DispatchQueue.main.async { onMake(view) }
+        return view
+    }
+
+    func updateNSView(_ view: CanvasView, context: Context) {
+        if view.state !== state { view.state = state }
+        view.needsDisplay = true
+    }
+}
+
+extension Notification.Name {
+    static let zineShowExport = Notification.Name("ZineMaker.showExport")
+    static let zineShowTemplates = Notification.Name("ZineMaker.showTemplates")
+}

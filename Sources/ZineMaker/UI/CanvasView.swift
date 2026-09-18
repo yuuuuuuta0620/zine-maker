@@ -24,6 +24,12 @@ final class CanvasView: NSView {
     private var snapLinesY: [CGFloat] = []
     private var dropTargetID: UUID?
     private var marquee: CGRect?
+    private var _lastMenuPoint: CGPoint = .zero
+
+    // キャンバス上で直接文字を打つための重ね置き
+    var editor: NSTextView?
+    var editorHost: NSView?
+    var editingID: UUID?
     private var cursorDocPoint: CGPoint?
 
     private let rulerThickness: CGFloat = 18
@@ -70,7 +76,15 @@ final class CanvasView: NSView {
         guard let state else { return }
         state.objectWillChange
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.needsDisplay = true }
+            .sink { [weak self] _ in
+                self?.needsDisplay = true
+                self?.layoutEditor()
+            }
+            .store(in: &cancellables)
+        // ページを移ったら編集は打ち切る
+        state.$currentIndex
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.commitEditing() }
             .store(in: &cancellables)
         state.$fitToken
             .receive(on: RunLoop.main)
@@ -92,7 +106,7 @@ final class CanvasView: NSView {
         CGRect(x: rulerSize, y: 0, width: max(bounds.width - rulerSize, 1), height: max(bounds.height - rulerSize, 1))
     }
 
-    private var docToView: CGAffineTransform {
+    var docToView: CGAffineTransform {
         CGAffineTransform(translationX: pan.x, y: pan.y).scaledBy(x: zoom, y: zoom)
     }
 
@@ -113,6 +127,7 @@ final class CanvasView: NSView {
 
     func setZoom(_ newZoom: CGFloat, around point: CGPoint) {
         userAdjusted = true
+        defer { layoutEditor() }
         let clamped = max(0.02, min(newZoom, 32))
         let before = docPoint(point)
         zoom = clamped
@@ -166,7 +181,8 @@ final class CanvasView: NSView {
                                            showColumns: state.showColumns,
                                            showCustomGuides: state.showCustomGuides,
                                            quality: .screen(maxPixel: screenMaxPixel),
-                                           hairline: 1 / zoom))
+                                           hairline: 1 / zoom,
+                                           skipElementID: editingID))
         ctx.restoreGState()
 
         drawSnapLines(in: ctx)
@@ -448,9 +464,77 @@ final class CanvasView: NSView {
         NSCursor.arrow.set()
     }
 
+    /// キャンバスの右クリック
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let state else { return nil }
+        let point = docPoint(convert(event.locationInWindow, from: nil))
+        // 押した場所に要素があれば選び直してからメニューを出す
+        if let hit = state.currentBoard.elements.last(where: { !$0.locked && !$0.hidden && $0.contains(point) }),
+           !state.selection.contains(hit.id) {
+            state.selection = [hit.id]
+        }
+        lastMenuPoint = point
+
+        let menu = NSMenu()
+        let hasSelection = !state.selection.isEmpty
+        func add(_ title: String, _ selector: Selector, _ key: String = "", enabled: Bool = true) {
+            let item = NSMenuItem(title: title, action: selector, keyEquivalent: key)
+            item.target = self
+            item.isEnabled = enabled
+            menu.addItem(item)
+        }
+        add("切り取り", #selector(cutFromMenu), "x", enabled: hasSelection)
+        add("コピー", #selector(copyFromMenu), "c", enabled: hasSelection)
+        add("ここに貼り付け", #selector(pasteFromMenu), "v", enabled: state.canPaste)
+        menu.addItem(.separator())
+        add("複製", #selector(duplicateFromMenu), "d", enabled: hasSelection)
+        add("削除", #selector(deleteFromMenu), enabled: hasSelection)
+        menu.addItem(.separator())
+        add("最前面へ", #selector(bringFrontFromMenu), enabled: hasSelection)
+        add("最背面へ", #selector(sendBackFromMenu), enabled: hasSelection)
+        return menu
+    }
+
+    private var lastMenuPoint: CGPoint {
+        get { _lastMenuPoint }
+        set { _lastMenuPoint = newValue }
+    }
+
+    @objc private func cutFromMenu() { state?.cutSelection() }
+    @objc private func copyFromMenu() { state?.copySelection() }
+    @objc private func pasteFromMenu() { state?.paste(at: _lastMenuPoint) }
+    @objc private func duplicateFromMenu() { state?.duplicateSelected() }
+    @objc private func deleteFromMenu() { state?.deleteSelected() }
+    @objc private func bringFrontFromMenu() { state?.bringToFront() }
+    @objc private func sendBackFromMenu() { state?.sendToBack() }
+
     override func mouseDown(with event: NSEvent) {
-        window?.makeFirstResponder(self)
         guard let state else { return }
+        let hitPoint = docPoint(convert(event.locationInWindow, from: nil))
+
+        // 編集中に外を押したら確定する
+        if editingID != nil {
+            let stillInside = state.currentBoard.elements
+                .first { $0.id == editingID }?.contains(hitPoint) ?? false
+            if !stillInside { commitEditing() } else { return }
+        }
+
+        // 文字を打ちに行く合図は2つ。ダブルクリックと、選択済みの枠をもう一度押すこと。
+        if let hit = state.currentBoard.elements.last(where: { !$0.locked && !$0.hidden && $0.contains(hitPoint) }),
+           hit.textFrame != nil,
+           event.clickCount == 2 || (state.selection == [hit.id] && !event.modifierFlags.contains(.shift)) {
+            if canEditDirectly(hit) {
+                state.selection = [hit.id]
+                beginEditing(hit.id)
+                return
+            } else if hit.textFrame?.isDynamic == true, event.clickCount == 2 {
+                state.selection = [hit.id]
+                state.status = "この文字は写真から差し込んでいます。右の「写真から差し込む」で直してください。"
+                return
+            }
+        }
+
+        window?.makeFirstResponder(self)
         let vp = convert(event.locationInWindow, from: nil)
         let point = docPoint(vp)
         let additive = event.modifierFlags.contains(.shift)
@@ -548,6 +632,7 @@ final class CanvasView: NSView {
             userAdjusted = true
             pan = CGPoint(x: origin.x + vp.x - start.x, y: origin.y + vp.y - start.y)
             needsDisplay = true
+            layoutEditor()
 
         case .move(let origins, let start):
             var dx = point.x - start.x, dy = point.y - start.y
@@ -782,6 +867,7 @@ final class CanvasView: NSView {
             pan.x += event.scrollingDeltaX
             pan.y -= event.scrollingDeltaY
             needsDisplay = true
+            layoutEditor()
         }
     }
 
@@ -802,6 +888,9 @@ final class CanvasView: NSView {
         case 125: nudge(dx: 0, dy: -step)
         case 126: nudge(dx: 0, dy: step)
         case 53:  state.selection.removeAll()
+        case 36:  // Return
+            if let single = state.singleSelection, canEditDirectly(single) { beginEditing(single.id) }
+            else { super.keyDown(with: event) }
         default: super.keyDown(with: event)
         }
     }

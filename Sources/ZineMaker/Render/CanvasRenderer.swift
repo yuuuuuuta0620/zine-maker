@@ -43,6 +43,8 @@ enum CanvasRenderer {
         var colorSpace: CGColorSpace?
         /// 写真をこの空間に変換してから埋める
         var imageProfile: ColorProfile?
+        /// 編集中などで、この要素だけ描かない
+        var skipElementID: UUID?
     }
 
     /// 出力先の色空間に合わせた色を返す
@@ -72,6 +74,7 @@ enum CanvasRenderer {
         for element in elements {
             // 非表示の要素は画面でも書き出しでも描かない
             if element.hidden { continue }
+            if let skip = options.skipElementID, element.id == skip { continue }
 
             ctx.saveGState()
             if element.rotation != 0 { ctx.concatenate(element.transform) }

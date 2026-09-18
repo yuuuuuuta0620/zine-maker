@@ -6,6 +6,7 @@ struct ContentView: View {
     @ObservedObject var store: DocumentStore
     @State private var showingExport = false
     @State private var showingTemplates = false
+    @State private var showingPreflight = false
 
     @ObservedObject private var prefs = Preferences.shared
 
@@ -29,9 +30,11 @@ struct ContentView: View {
         .toolbar { toolbarItems }
         .sheet(isPresented: $showingExport) { ExportSheet(state: state) }
         .sheet(isPresented: $showingTemplates) { TemplatePicker(state: state) }
+        .sheet(isPresented: $showingPreflight) { PreflightSheet(state: state) }
         .safeAreaInset(edge: .bottom) { statusBar }
         .onReceive(NotificationCenter.default.publisher(for: .zineShowExport)) { _ in showingExport = true }
         .onReceive(NotificationCenter.default.publisher(for: .zineShowTemplates)) { _ in showingTemplates = true }
+        .onReceive(NotificationCenter.default.publisher(for: .zineShowPreflight)) { _ in showingPreflight = true }
         .onChange(of: state.currentIndex) { _, _ in prefetchNeighbours() }
         .onAppear { prefetchNeighbours() }
     }
@@ -107,7 +110,12 @@ struct ContentView: View {
 
         toolbarSpacer
 
-        ToolbarItem {
+        ToolbarItemGroup {
+            Button { showingPreflight = true } label: {
+                Label("点検", systemImage: "checklist")
+            }
+            .help("書き出す前に、解像度・あふれ・塗り足しなどを点検する（⌘⇧P）")
+
             Button { showingExport = true } label: {
                 Label("書き出し", systemImage: "square.and.arrow.up")
             }
@@ -238,4 +246,5 @@ struct CanvasRepresentable: NSViewRepresentable {
 extension Notification.Name {
     static let zineShowExport = Notification.Name("ZineMaker.showExport")
     static let zineShowTemplates = Notification.Name("ZineMaker.showTemplates")
+    static let zineShowPreflight = Notification.Name("ZineMaker.showPreflight")
 }

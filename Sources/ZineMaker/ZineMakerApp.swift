@@ -44,6 +44,8 @@ struct ZineMakerApp: App {
                 .keyboardShortcut("s", modifiers: [.command, .shift]).disabled(doc == nil)
             Button("複製") { store.duplicateActive() }.disabled(doc == nil)
             Divider()
+            Button("書き出す前に点検…") { NotificationCenter.default.post(name: .zineShowPreflight, object: nil) }
+                .keyboardShortcut("p", modifiers: [.command, .shift]).disabled(doc == nil)
             Button("書き出し…") { NotificationCenter.default.post(name: .zineShowExport, object: nil) }
                 .keyboardShortcut("e").disabled(doc == nil)
             Divider()
@@ -52,16 +54,22 @@ struct ZineMakerApp: App {
         }
 
         CommandGroup(replacing: .undoRedo) {
-            Button("取り消す") { doc?.undo() }.keyboardShortcut("z").disabled(!(doc?.canUndo ?? false))
-            Button("やり直す") { doc?.redo() }.keyboardShortcut("z", modifiers: [.command, .shift])
+            Button("取り消す") { if !TextEditing.yield(TextEditing.undo) { doc?.undo() } }.keyboardShortcut("z").disabled(!(doc?.canUndo ?? false))
+            Button("やり直す") { if !TextEditing.yield(TextEditing.redo) { doc?.redo() } }.keyboardShortcut("z", modifiers: [.command, .shift])
                 .disabled(!(doc?.canRedo ?? false))
         }
 
-        CommandGroup(after: .pasteboard) {
+        CommandGroup(replacing: .pasteboard) {
+            Button("切り取り") { if !TextEditing.yield(TextEditing.cut) { doc?.cutSelection() } }
+                .keyboardShortcut("x").disabled(doc?.selection.isEmpty ?? true)
+            Button("コピー") { if !TextEditing.yield(TextEditing.copy) { doc?.copySelection() } }
+                .keyboardShortcut("c").disabled(doc?.selection.isEmpty ?? true)
+            Button("貼り付け") { if !TextEditing.yield(TextEditing.paste) { doc?.paste() } }
+                .keyboardShortcut("v").disabled(!(doc?.canPaste ?? false))
             Divider()
-            Button("すべて選択") { doc?.selectAll() }.keyboardShortcut("a").disabled(doc == nil)
-            Button("複製") { doc?.duplicateSelected() }.keyboardShortcut("d").disabled(doc == nil)
-            Button("削除") { doc?.deleteSelected() }.keyboardShortcut(.delete, modifiers: [])
+            Button("すべて選択") { if !TextEditing.yield(TextEditing.selectAll) { doc?.selectAll() } }.keyboardShortcut("a").disabled(doc == nil)
+            Button("複製") { if !TextEditing.isActive { doc?.duplicateSelected() } }.keyboardShortcut("d").disabled(doc == nil)
+            Button("削除") { if !TextEditing.yield(TextEditing.deleteBackward) { doc?.deleteSelected() } }.keyboardShortcut(.delete, modifiers: [])
                 .disabled(doc == nil)
         }
 

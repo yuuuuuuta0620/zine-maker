@@ -149,6 +149,16 @@ struct TemplatePicker: View {
     @ObservedObject var state: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var mode: Mode = .thisBoard
+    // 余白の取り方は、誌面と組写真で別々に覚えておく
+    @AppStorage("layout.outerMargin.zine") private var zineOuter = true
+    @AppStorage("layout.gaps.zine") private var zineGaps = true
+    @AppStorage("layout.outerMargin.board") private var boardOuter = true
+    @AppStorage("layout.gaps.board") private var boardGaps = true
+
+    private var isBoard: Bool { state.settings.kind == .board }
+    private var outerMargin: Binding<Bool> { isBoard ? $boardOuter : $zineOuter }
+    private var gaps: Binding<Bool> { isBoard ? $boardGaps : $zineGaps }
+    private var spacing: LayoutSpacing { LayoutSpacing(outerMargin: outerMargin.wrappedValue, gaps: gaps.wrappedValue) }
 
     enum Mode: String, CaseIterable, Identifiable {
         case thisBoard, flowAll
@@ -181,17 +191,27 @@ struct TemplatePicker: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            HStack(spacing: 16) {
+                Toggle("外側の余白", isOn: outerMargin)
+                Toggle("写真の間の隙間", isOn: gaps)
+                Spacer()
+            }
+            .toggleStyle(.checkbox)
+            .font(.system(size: 11))
+            .help(isBoard ? "両方外すと、紙の端まで写真だけで埋まります"
+                          : "外側の余白を外すと、塗り足しまで写真が伸びます")
+
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 10)], spacing: 10) {
-                    ForEach(LayoutTemplate.suggestions(for: max(photoCount, 1),
-                                                       bleedFirst: state.settings.kind == .board)) { template in
+                    ForEach(LayoutTemplate.suggestions(for: max(photoCount, 1))) { template in
                         Button {
-                            if mode == .thisBoard { state.applyTemplate(template) }
-                            else { state.autoFlow(template: template) }
+                            if mode == .thisBoard { state.applyTemplate(template, spacing: spacing) }
+                            else { state.autoFlow(template: template, spacing: spacing) }
                             dismiss()
                         } label: {
                             VStack(spacing: 4) {
-                                TemplateGlyph(template: template, aspect: state.settings.trimBox.size.aspect)
+                                TemplateGlyph(template: template, aspect: state.settings.trimBox.size.aspect,
+                                              spacing: spacing)
                                     .frame(height: 58)
                                 Text(template.name).font(.system(size: 10))
                                     .lineLimit(1).minimumScaleFactor(0.8)
@@ -217,6 +237,7 @@ struct TemplatePicker: View {
 struct TemplateGlyph: View {
     let template: LayoutTemplate
     var aspect: CGFloat = 0.8
+    var spacing = LayoutSpacing()
 
     var body: some View {
         GeometryReader { geo in
@@ -229,16 +250,18 @@ struct TemplateGlyph: View {
                     .fill(Color.primary.opacity(0.06))
                     .frame(width: boxW, height: boxH)
                     .offset(x: ox, y: oy)
-                // 端まで使う型は隙間なしで、そう見えるように描く
-                let gap: CGFloat = template.bleed ? 0.5 : 1.5
+                // 余白と隙間の設定がそのまま見えるように描く
+                let margin: CGFloat = spacing.outerMargin ? boxW * 0.07 : 0
+                let gap: CGFloat = spacing.gaps ? 2 : 0.5
+                let innerW = boxW - margin * 2, innerH = boxH - margin * 2
                 ForEach(Array(template.slots.enumerated()), id: \.offset) { _, slot in
-                    RoundedRectangle(cornerRadius: template.bleed ? 0.5 : 1.5)
+                    RoundedRectangle(cornerRadius: spacing.gaps ? 1.5 : 0.5)
                         .fill(Color.accentColor.opacity(0.55))
-                        .frame(width: max(slot.width * boxW - gap, 1),
-                               height: max(slot.height * boxH - gap, 1))
+                        .frame(width: max(slot.width * innerW - gap, 1),
+                               height: max(slot.height * innerH - gap, 1))
                         // slots は y-up、SwiftUI は y-down なので上下を入れ替える
-                        .offset(x: ox + slot.minX * boxW + gap / 2,
-                                y: oy + (1 - slot.maxY) * boxH + gap / 2)
+                        .offset(x: ox + margin + slot.minX * innerW + gap / 2,
+                                y: oy + margin + (1 - slot.maxY) * innerH + gap / 2)
                 }
             }
         }

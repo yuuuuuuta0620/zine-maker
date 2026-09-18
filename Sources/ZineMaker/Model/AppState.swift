@@ -496,12 +496,17 @@ final class AppState: ObservableObject, Identifiable {
         selection = [frame.id]
     }
 
-    /// 型を展開する領域。端まで使う型は紙いっぱい（塗り足しも含む）。
-    private func layoutBox(for template: LayoutTemplate) -> CGRect {
-        if template.bleed { return settings.mediaBox }
+    /// 型を展開する領域。外周の余白を取らないときは紙いっぱい（誌面なら塗り足しまで）。
+    private func layoutBox(_ spacing: LayoutSpacing) -> CGRect {
+        guard spacing.outerMargin else { return settings.mediaBox }
         return settings.kind == .zine
             ? settings.marginBox(0).union(settings.marginBox(settings.pagesPerSpread - 1))
             : settings.contentBox
+    }
+
+    private func layoutGutter(_ spacing: LayoutSpacing) -> CGFloat {
+        guard spacing.gaps else { return 0 }
+        return settings.kind == .zine ? Pt.fromMM(4) : settings.boardGutter
     }
 
     /// 選択中の写真枠を、写真の形に合わせ直す。面積はおおよそ保つ。
@@ -659,12 +664,11 @@ final class AppState: ObservableObject, Identifiable {
 
     /// レイアウトを現在のボードに適用し、空き枠に写真を流し込む。
     /// `photos` を渡すとそれを、渡さなければトレイの選択（なければ未配置の写真）を使う。
-    func applyTemplate(_ template: LayoutTemplate, photos: [UUID]? = nil, replaceExisting: Bool = true) {
+    func applyTemplate(_ template: LayoutTemplate, photos: [UUID]? = nil, replaceExisting: Bool = true,
+                       spacing: LayoutSpacing = .init()) {
         beginUndoGroup()
 
-        let box = layoutBox(for: template)
-        let gutter = template.bleed ? 0 : (settings.kind == .zine ? Pt.fromMM(4) : settings.boardGutter)
-        let rects = template.frames(in: box, gutter: gutter)
+        let rects = template.frames(in: layoutBox(spacing), gutter: layoutGutter(spacing))
 
         // 使う写真を決める
         var queue: [UUID]
@@ -693,7 +697,7 @@ final class AppState: ObservableObject, Identifiable {
     }
 
     /// トレイの写真を、テンプレートを繰り返し使って複数ボードへ流し込む
-    func autoFlow(template: LayoutTemplate, photos: [PhotoAsset]? = nil) {
+    func autoFlow(template: LayoutTemplate, photos: [PhotoAsset]? = nil, spacing: LayoutSpacing = .init()) {
         let source = photos ?? (traySelection.isEmpty ? unplacedAssets
                                                       : assets.filter { traySelection.contains($0.id) })
         guard !source.isEmpty else { status = "流し込む写真がありません"; return }
@@ -707,7 +711,7 @@ final class AppState: ObservableObject, Identifiable {
             let index = startIndex + offset
             if index >= boards.count { boards.append(Artboard()) }
             currentIndex = index
-            applyTemplateWithoutUndo(template, photos: chunk.map(\.id))
+            applyTemplateWithoutUndo(template, photos: chunk.map(\.id), spacing: spacing)
         }
         currentIndex = startIndex
         traySelection.removeAll()
@@ -715,9 +719,9 @@ final class AppState: ObservableObject, Identifiable {
         status = "\(source.count) 枚を \(chunks.count) \(settings.kind.unitLabel)に流し込みました"
     }
 
-    private func applyTemplateWithoutUndo(_ template: LayoutTemplate, photos: [UUID]) {
-        let box = layoutBox(for: template)
-        let gutter = template.bleed ? 0 : (settings.kind == .zine ? Pt.fromMM(4) : settings.boardGutter)
+    private func applyTemplateWithoutUndo(_ template: LayoutTemplate, photos: [UUID], spacing: LayoutSpacing) {
+        let box = layoutBox(spacing)
+        let gutter = layoutGutter(spacing)
         var queue = photos
         var board = currentBoard
         board.elements.removeAll { $0.imageFrame != nil }

@@ -180,6 +180,7 @@ final class AppState: ObservableObject {
             switch copy {
             case .image(var f): f.id = UUID(); f.rect = f.rect.offsetBy(dx: offset, dy: -offset); copy = .image(f)
             case .text(var f):  f.id = UUID(); f.rect = f.rect.offsetBy(dx: offset, dy: -offset); copy = .text(f)
+            case .shape(var f): f.id = UUID(); f.rect = f.rect.offsetBy(dx: offset, dy: -offset); copy = .shape(f)
             }
             newIDs.insert(copy.id)
             board.elements.append(copy)
@@ -318,6 +319,7 @@ final class AppState: ObservableObject {
                 switch copy {
                 case .image(var f): f.id = UUID(); f.rect = f.rect.offsetBy(dx: offset.x, dy: offset.y); copy = .image(f)
                 case .text(var f):  f.id = UUID(); f.rect = f.rect.offsetBy(dx: offset.x, dy: offset.y); copy = .text(f)
+                case .shape(var f): f.id = UUID(); f.rect = f.rect.offsetBy(dx: offset.x, dy: offset.y); copy = .shape(f)
                 }
                 newIDs.insert(copy.id)
                 board.elements.append(copy)
@@ -437,6 +439,26 @@ final class AppState: ObservableObject {
         selection = [frame.id]
     }
 
+    func addShape(_ kind: ShapeKind, at point: CGPoint? = nil) {
+        beginUndoGroup()
+        let box = settings.contentBox
+        let size: CGSize
+        switch kind {
+        case .line: size = CGSize(width: box.width * 0.4, height: 1)
+        default:    size = CGSize(width: box.width * 0.3, height: box.height * 0.3)
+        }
+        let origin = point.map { CGPoint(x: $0.x - size.width / 2, y: $0.y - size.height / 2) }
+            ?? CGPoint(x: box.midX - size.width / 2, y: box.midY - size.height / 2)
+        var frame = ShapeFrame(rect: CGRect(origin: origin, size: size), kind: kind)
+        frame.fill = kind == .line ? nil : settings.background.contrastingInk
+        if kind == .line {
+            frame.stroke = settings.background.contrastingInk
+            frame.strokeWidth = settings.kind == .zine ? 0.5 : max(settings.boardLongEdge / 1400, 1)
+        }
+        currentBoard.elements.append(.shape(frame))
+        selection = [frame.id]
+    }
+
     // MARK: - ボード
 
     func addBoard() {
@@ -455,6 +477,7 @@ final class AppState: ObservableObject {
             switch e {
             case .image(var f): f.id = UUID(); e = .image(f)
             case .text(var f):  f.id = UUID(); e = .text(f)
+            case .shape(var f): f.id = UUID(); e = .shape(f)
             }
             return e
         }
@@ -643,6 +666,96 @@ final class AppState: ObservableObject {
         currentIndex = 0
         selection.removeAll()
         status = "表紙・ステートメント・作品一覧・プロフィールを追加しました"
+    }
+
+    // MARK: 写真集の型
+
+    /// 現在のページを写真集の型で組み直す
+    func applyBookStyle(_ key: String, title: String = "", subtitle: String = "") {
+        beginUndoGroup()
+        let style = BookLayouts.styles.first { $0.key == key }
+        let need = style?.photoCount ?? 1
+        var photos: [UUID] = []
+        if need > 0 {
+            let fromTray = assets.filter { traySelection.contains($0.id) }.map(\.id)
+            let existing = currentBoard.imageFrames.compactMap(\.assetID)
+            photos = Array((fromTray.isEmpty ? existing + unplacedAssets.map(\.id) : fromTray).prefix(need))
+        }
+        var board = BookLayouts.make(key, settings: settings, photos: photos, assets: assetIndex,
+                                     title: title, subtitle: subtitle)
+        board.seriesID = currentBoard.seriesID
+        currentBoard = board
+        traySelection.removeAll()
+        selection.removeAll()
+        status = "「\(style?.name ?? key)」で組み直しました"
+    }
+
+    /// 型を新しいページとして足す
+    func addBookStyle(_ key: String, title: String = "", subtitle: String = "") {
+        beginUndoGroup()
+        boards.insert(Artboard(), at: currentIndex + 1)
+        currentIndex += 1
+        applyBookStyleWithoutUndo(key, title: title, subtitle: subtitle)
+    }
+
+    private func applyBookStyleWithoutUndo(_ key: String, title: String, subtitle: String) {
+        let style = BookLayouts.styles.first { $0.key == key }
+        let need = style?.photoCount ?? 1
+        let photos = need > 0 ? Array(unplacedAssets.map(\.id).prefix(need)) : []
+        currentBoard = BookLayouts.make(key, settings: settings, photos: photos, assets: assetIndex,
+                                        title: title, subtitle: subtitle)
+    }
+
+    /// トレイの写真を「1枚＋撮影データ」で1枚ずつページにする
+    func flowAsPlates(style: String = "plate") {
+        let source = traySelection.isEmpty ? unplacedAssets : assets.filter { traySelection.contains($0.id) }
+        guard !source.isEmpty else { status = "流し込む写真がありません"; return }
+        beginUndoGroup()
+        let per = max(BookLayouts.styles.first { $0.key == style }?.photoCount ?? 1, 1)
+        let chunks = stride(from: 0, to: source.count, by: per).map {
+            Array(source[$0..<min($0 + per, source.count)])
+        }
+        let start = currentIndex
+        for (offset, chunk) in chunks.enumerated() {
+            let index = start + offset
+            if index >= boards.count { boards.append(Artboard()) }
+            var board = BookLayouts.make(style, settings: settings, photos: chunk.map(\.id), assets: assetIndex)
+            board.seriesID = boards[index].seriesID
+            boards[index] = board
+        }
+        currentIndex = start
+        traySelection.removeAll()
+        selection.removeAll()
+        status = "\(source.count) 枚を \(chunks.count) ページに組みました"
+    }
+
+    // MARK: 全ページ共通の要素
+
+    func setPageNumberMaster(corner: BookLayouts.Corner, stacked: Bool) {
+        beginUndoGroup()
+        settings.masterElements = BookLayouts.pageNumberMaster(settings, corner: corner, stacked: stacked)
+        status = "ノンブルを全ページに置きました"
+    }
+
+    func clearMaster() {
+        beginUndoGroup()
+        settings.masterElements = []
+    }
+
+    /// 選択中の要素を全ページ共通に移す
+    func moveSelectionToMaster() {
+        guard !selection.isEmpty else { return }
+        beginUndoGroup()
+        let moving = selectedElements
+        currentBoard.elements.removeAll { selection.contains($0.id) }
+        settings.masterElements.append(contentsOf: moving)
+        selection.removeAll()
+        status = "\(moving.count) 個を全ページ共通にしました"
+    }
+
+    func toggleMasterOnCurrentBoard() {
+        beginUndoGroup()
+        currentBoard.hidesMaster.toggle()
     }
 
     // MARK: シリーズ

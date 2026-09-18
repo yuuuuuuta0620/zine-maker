@@ -47,6 +47,54 @@ struct PortfolioMetaSection: View {
     }
 }
 
+/// 全ページに敷く共通要素（ノンブル・罫線）
+struct MasterSection: View {
+    @ObservedObject var state: AppState
+    @State private var expanded = false
+    @State private var corner: BookLayouts.Corner = .bottomLeft
+    @State private var stacked = true
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("ここに置いた要素は、すべてのページの同じ位置に出ます。ページ側で個別に外せます。")
+                    .font(.system(size: 10)).foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Picker("ノンブルの位置", selection: $corner) {
+                    ForEach(BookLayouts.Corner.allCases) { Text($0.label).tag($0) }
+                }
+                .font(.system(size: 11))
+                Toggle("1桁ずつ縦に積む", isOn: $stacked).font(.system(size: 11))
+                Button("ノンブルを全ページに置く") {
+                    state.setPageNumberMaster(corner: corner, stacked: stacked)
+                }
+                .controlSize(.small)
+
+                Divider()
+                HStack(spacing: 6) {
+                    Button("選択中を共通にする") { state.moveSelectionToMaster() }
+                        .disabled(state.selection.isEmpty)
+                    Button("すべて消す") { state.clearMaster() }
+                        .disabled(state.settings.masterElements.isEmpty)
+                }
+                .controlSize(.small)
+
+                Toggle("このページでは共通要素を出さない", isOn: Binding(
+                    get: { state.currentBoard.hidesMaster },
+                    set: { _ in state.toggleMasterOnCurrentBoard() }))
+                    .font(.system(size: 11))
+
+                Text("いま \(state.settings.masterElements.count) 個")
+                    .font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
+            }
+            .padding(.top, 6)
+        } label: {
+            SectionHeader("全ページ共通（ノンブル・罫線）", icon: "doc.on.doc")
+        }
+    }
+}
+
 struct SeriesSection: View {
     @ObservedObject var state: AppState
     @State private var expanded = false
@@ -102,7 +150,46 @@ struct PagePanel: View {
     @ObservedObject var state: AppState
     @State private var captionTemplate = CaptionTemplate.presets[1].template
 
+    @State private var styleTitle = ""
+    @State private var styleSubtitle = ""
+
     private var board: Artboard { state.currentBoard }
+
+    /// 黒地に写真を浮かせる写真集の型
+    private var bookStyleSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionHeader("写真集の型で組む", icon: "books.vertical")
+            HStack(spacing: 6) {
+                TextField("見出し", text: $styleTitle)
+                    .textFieldStyle(.roundedBorder).font(.system(size: 11))
+                TextField("添え字", text: $styleSubtitle)
+                    .textFieldStyle(.roundedBorder).font(.system(size: 11))
+            }
+            ForEach(BookLayouts.styles) { style in
+                HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(style.name).font(.system(size: 11))
+                        Text(style.detail).font(.system(size: 9)).foregroundStyle(.tertiary)
+                            .lineLimit(1).truncationMode(.tail)
+                    }
+                    Spacer(minLength: 2)
+                    Button("置換") {
+                        state.applyBookStyle(style.key, title: styleTitle, subtitle: styleSubtitle)
+                    }
+                    Button("追加") {
+                        state.addBookStyle(style.key, title: styleTitle, subtitle: styleSubtitle)
+                    }
+                }
+                .controlSize(.small)
+                .padding(.vertical, 2)
+            }
+            Divider()
+            Button("トレイの写真を「1枚＋撮影データ」で1枚ずつページにする") {
+                state.flowAsPlates()
+            }
+            .controlSize(.small)
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.sectionGap) {
@@ -156,6 +243,8 @@ struct PagePanel: View {
                     .font(.system(size: 10)).foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            bookStyleSection
 
             VStack(alignment: .leading, spacing: 8) {
                 SectionHeader("ページを追加", icon: "plus.rectangle.on.rectangle")

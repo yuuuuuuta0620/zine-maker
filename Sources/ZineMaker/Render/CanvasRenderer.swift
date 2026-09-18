@@ -57,7 +57,10 @@ enum CanvasRenderer {
             ctx.fill(settings.mediaBox)
         }
 
-        for element in board.elements {
+        // 全ページ共通の要素（ノンブル・罫線など）を先に敷く
+        let elements = board.hidesMaster ? board.elements : settings.masterElements + board.elements
+
+        for element in elements {
             // 非表示の要素は画面でも書き出しでも描かない
             if element.hidden { continue }
 
@@ -66,6 +69,7 @@ enum CanvasRenderer {
             switch element {
             case .image(let frame): drawImage(frame, assets: assets, in: ctx, options: options)
             case .text(let frame):  drawText(frame, in: ctx, scene: scene)
+            case .shape(let frame): drawShape(frame, in: ctx)
             }
             ctx.restoreGState()
         }
@@ -186,6 +190,70 @@ enum CanvasRenderer {
         ctx.restoreGState()
     }
 
+    // MARK: - 図形
+
+    static func shapePath(_ frame: ShapeFrame) -> CGPath {
+        let r = frame.rect
+        switch frame.kind {
+        case .rectangle:
+            return roundedPath(r, radius: frame.cornerRadius)
+        case .ellipse:
+            return CGPath(ellipseIn: r, transform: nil)
+        case .line:
+            // 罫線は枠の中心線。太さは strokeWidth で決める
+            let path = CGMutablePath()
+            if frame.isVerticalLine {
+                path.move(to: CGPoint(x: r.midX, y: r.minY))
+                path.addLine(to: CGPoint(x: r.midX, y: r.maxY))
+            } else {
+                path.move(to: CGPoint(x: r.minX, y: r.midY))
+                path.addLine(to: CGPoint(x: r.maxX, y: r.midY))
+            }
+            return path
+        case .diamond:
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: r.midX, y: r.maxY))
+            path.addLine(to: CGPoint(x: r.maxX, y: r.midY))
+            path.addLine(to: CGPoint(x: r.midX, y: r.minY))
+            path.addLine(to: CGPoint(x: r.minX, y: r.midY))
+            path.closeSubpath()
+            return path
+        case .triangle:
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: r.midX, y: r.maxY))
+            path.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+            path.addLine(to: CGPoint(x: r.minX, y: r.minY))
+            path.closeSubpath()
+            return path
+        }
+    }
+
+    static func drawShape(_ frame: ShapeFrame, in ctx: CGContext) {
+        guard frame.rect.width > 0 || frame.rect.height > 0 else { return }
+        let path = shapePath(frame)
+
+        ctx.saveGState()
+        ctx.setAlpha(frame.opacity)
+
+        // 罫線は塗らない（線だけ）
+        if frame.kind != .line, let fill = frame.fill {
+            ctx.addPath(path)
+            ctx.setFillColor(fill.cgColor)
+            ctx.fillPath()
+        }
+
+        let lineColor = frame.kind == .line ? (frame.stroke ?? frame.fill) : frame.stroke
+        let lineWidth = frame.kind == .line && frame.strokeWidth <= 0 ? 0.5 : frame.strokeWidth
+        if let lineColor, lineWidth > 0 {
+            ctx.addPath(path)
+            ctx.setStrokeColor(lineColor.cgColor)
+            ctx.setLineWidth(lineWidth)
+            ctx.setLineCap(.butt)
+            ctx.strokePath()
+        }
+        ctx.restoreGState()
+    }
+
     // MARK: - テキスト（Core Text）
 
     /// 組版は Core Text に任せる。禁則処理・縦組みが標準で効き、
@@ -265,6 +333,20 @@ enum CanvasRenderer {
         ctx.textMatrix = .identity
         CTFrameDraw(ctFrame, ctx)
         ctx.restoreGState()
+    }
+
+    /// 枠に収まる最大の文字サイズを探す。雛形の文字が消える事故を防ぐ。
+    static func fittedFontSize(for frame: TextFrame, scene: Scene = .init(),
+                               minimum: CGFloat = 4) -> CGFloat {
+        var f = frame
+        guard textOverflows(f, scene: scene) else { return frame.fontSize }
+        var lo = minimum, hi = frame.fontSize
+        for _ in 0..<12 {
+            let mid = (lo + hi) / 2
+            f.fontSize = mid
+            if textOverflows(f, scene: scene) { hi = mid } else { lo = mid }
+        }
+        return lo
     }
 
     /// テキストが枠に収まりきらないか（あふれ表示に使う）
@@ -359,8 +441,15 @@ enum CanvasRenderer {
         ctx.scaleBy(x: scale, y: scale)
         ctx.translateBy(x: -source.minX, y: -source.minY)
         ctx.clip(to: source)
+
+        // オフスクリーン描画は一度きりなので、非同期デコードだと写真が間に合わず空になる。
+        // 画面用の指定で呼ばれても、ここでは同期で読む。
+        let syncQuality: ImageQuality
+        if case .screen = quality { syncQuality = .output(dpi: Double(scale * 72), jpegQuality: nil) }
+        else { syncQuality = quality }
+
         draw(board, settings: settings, scene: scene, in: ctx,
-             options: .init(guides: false, quality: quality))
+             options: .init(guides: false, quality: syncQuality))
         return ctx.makeImage()
     }
 }

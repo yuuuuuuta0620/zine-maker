@@ -42,6 +42,10 @@ struct PagePreset: Identifiable, Hashable {
         .init(name: "A6 / 文庫", widthMM: 105, heightMM: 148),
         .init(name: "正方形 180", widthMM: 180, heightMM: 180),
         .init(name: "正方形 210", widthMM: 210, heightMM: 210),
+        .init(name: "A4 ヨコ", widthMM: 297, heightMM: 210),
+        .init(name: "A5 ヨコ", widthMM: 210, heightMM: 148),
+        .init(name: "4:3 ヨコ（画面・PDF向け）", widthMM: 280, heightMM: 210),
+        .init(name: "16:9 ヨコ", widthMM: 320, heightMM: 180),
     ]
     var label: String { "\(name)（\(Int(widthMM))×\(Int(heightMM))）" }
 }
@@ -66,6 +70,9 @@ struct DocSettings: Codable, Equatable {
     var boardGutterPct: Double = 1.5
 
     var background: RGBA = .white
+
+    /// 全ページの下に敷く共通要素（罫線・ノンブルなど）。ページ側で個別に外せる。
+    var masterElements: [Element] = []
 
     // MARK: ガイドと段組み
 
@@ -194,6 +201,7 @@ struct DocSettings: Codable, Equatable {
         columns          = c.value(.columns, 0)
         rows             = c.value(.rows, 0)
         columnGutter     = c.value(.columnGutter, 4)
+        masterElements   = c.value(.masterElements, [])
     }
 
     var displaySize: String {
@@ -394,14 +402,79 @@ struct TextFrame: Codable, Identifiable, Equatable {
     }
 }
 
+/// 罫線・囲み・地色帯・図形。写真集では見出しの下線やサイドバーの帯として多用する。
+enum ShapeKind: String, Codable, CaseIterable, Identifiable {
+    case rectangle, ellipse, line, diamond, triangle
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .rectangle: "四角"; case .ellipse: "楕円"; case .line: "罫線"
+        case .diamond: "菱形"; case .triangle: "三角"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .rectangle: "rectangle"; case .ellipse: "circle"; case .line: "minus"
+        case .diamond: "diamond"; case .triangle: "triangle"
+        }
+    }
+}
+
+struct ShapeFrame: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var rect: CGRect
+    var rotation: CGFloat = 0
+    var locked = false
+    var hidden = false
+    var name: String?
+
+    var kind: ShapeKind = .rectangle
+    /// nil で塗りなし
+    var fill: RGBA? = .ink
+    var stroke: RGBA?
+    var strokeWidth: CGFloat = 0
+    var cornerRadius: CGFloat = 0
+    var opacity: CGFloat = 1
+    /// 罫線を縦に引く（既定は枠の長い方向）
+    var lineVertical: Bool?
+
+    init(rect: CGRect, kind: ShapeKind = .rectangle) {
+        self.rect = rect
+        self.kind = kind
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id           = c.value(.id, UUID())
+        rect         = c.value(.rect, .zero)
+        rotation     = c.value(.rotation, 0)
+        locked       = c.value(.locked, false)
+        hidden       = c.value(.hidden, false)
+        name         = c.value(.name, String?.none)
+        kind         = c.value(.kind, .rectangle)
+        fill         = c.value(.fill, RGBA?.some(.ink))
+        stroke       = c.value(.stroke, RGBA?.none)
+        strokeWidth  = c.value(.strokeWidth, 0)
+        cornerRadius = c.value(.cornerRadius, 0)
+        opacity      = c.value(.opacity, 1)
+        lineVertical = c.value(.lineVertical, Bool?.none)
+    }
+
+    /// 罫線を縦に引くか（未指定なら枠の形で決める）
+    var isVerticalLine: Bool { lineVertical ?? (rect.height > rect.width) }
+}
+
 enum Element: Codable, Identifiable, Equatable {
     case image(ImageFrame)
     case text(TextFrame)
+    case shape(ShapeFrame)
 
     var id: UUID {
         switch self {
         case .image(let f): f.id
         case .text(let f): f.id
+        case .shape(let f): f.id
         }
     }
 
@@ -410,12 +483,14 @@ enum Element: Codable, Identifiable, Equatable {
             switch self {
             case .image(let f): f.rect
             case .text(let f): f.rect
+            case .shape(let f): f.rect
             }
         }
         set {
             switch self {
             case .image(var f): f.rect = newValue; self = .image(f)
             case .text(var f): f.rect = newValue; self = .text(f)
+            case .shape(var f): f.rect = newValue; self = .shape(f)
             }
         }
     }
@@ -425,12 +500,14 @@ enum Element: Codable, Identifiable, Equatable {
             switch self {
             case .image(let f): f.rotation
             case .text(let f): f.rotation
+            case .shape(let f): f.rotation
             }
         }
         set {
             switch self {
             case .image(var f): f.rotation = newValue; self = .image(f)
             case .text(var f): f.rotation = newValue; self = .text(f)
+            case .shape(var f): f.rotation = newValue; self = .shape(f)
             }
         }
     }
@@ -440,12 +517,14 @@ enum Element: Codable, Identifiable, Equatable {
             switch self {
             case .image(let f): f.locked
             case .text(let f): f.locked
+            case .shape(let f): f.locked
             }
         }
         set {
             switch self {
             case .image(var f): f.locked = newValue; self = .image(f)
             case .text(var f): f.locked = newValue; self = .text(f)
+            case .shape(var f): f.locked = newValue; self = .shape(f)
             }
         }
     }
@@ -455,12 +534,14 @@ enum Element: Codable, Identifiable, Equatable {
             switch self {
             case .image(let f): f.hidden
             case .text(let f): f.hidden
+            case .shape(let f): f.hidden
             }
         }
         set {
             switch self {
             case .image(var f): f.hidden = newValue; self = .image(f)
             case .text(var f): f.hidden = newValue; self = .text(f)
+            case .shape(var f): f.hidden = newValue; self = .shape(f)
             }
         }
     }
@@ -470,12 +551,14 @@ enum Element: Codable, Identifiable, Equatable {
             switch self {
             case .image(let f): f.name
             case .text(let f): f.name
+            case .shape(let f): f.name
             }
         }
         set {
             switch self {
             case .image(var f): f.name = newValue; self = .image(f)
             case .text(var f): f.name = newValue; self = .text(f)
+            case .shape(var f): f.name = newValue; self = .shape(f)
             }
         }
     }
@@ -511,17 +594,20 @@ enum Element: Codable, Identifiable, Equatable {
 
     var imageFrame: ImageFrame? { if case .image(let f) = self { f } else { nil } }
     var textFrame: TextFrame? { if case .text(let f) = self { f } else { nil } }
+    var shapeFrame: ShapeFrame? { if case .shape(let f) = self { f } else { nil } }
 
     var typeLabel: String {
         switch self {
         case .image: "写真"
         case .text: "テキスト"
+        case .shape(let f): f.kind.label
         }
     }
     var icon: String {
         switch self {
         case .image: "photo"
         case .text: "textformat"
+        case .shape(let f): f.kind.icon
         }
     }
 }
@@ -534,6 +620,8 @@ struct Artboard: Codable, Identifiable, Equatable {
     var seriesID: UUID?
     /// 中扉などに使う見出し
     var title: String = ""
+    /// 表紙など、共通要素を出したくないページ
+    var hidesMaster = false
 
     var imageFrames: [ImageFrame] { elements.compactMap(\.imageFrame) }
 
@@ -546,6 +634,7 @@ struct Artboard: Codable, Identifiable, Equatable {
         role     = c.value(.role, .content)
         seriesID = c.value(.seriesID, UUID?.none)
         title    = c.value(.title, "")
+        hidesMaster = c.value(.hidesMaster, false)
     }
 }
 

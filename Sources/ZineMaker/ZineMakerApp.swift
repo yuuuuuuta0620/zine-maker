@@ -56,6 +56,13 @@ struct ZineMakerApp: App {
             Button("テキストを追加") { state.addTextFrame() }.keyboardShortcut("t")
             Button("空の写真枠を追加") { state.addImageFrame() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
+            Menu("図形を追加") {
+                ForEach(ShapeKind.allCases) { kind in
+                    Button(kind.label) { state.addShape(kind) }
+                }
+            }
+            Button("罫線を追加") { state.addShape(.line) }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
 
             Divider()
             Button("\(state.settings.kind.unitLabel)を追加") { state.addBoard() }

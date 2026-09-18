@@ -71,6 +71,7 @@ private struct DocumentPanel: View {
 
             PortfolioMetaSection(state: state)
             SeriesSection(state: state)
+            MasterSection(state: state)
 
             VStack(alignment: .leading, spacing: 8) {
                 SectionHeader("地色", icon: "paintpalette")
@@ -263,6 +264,7 @@ private struct SelectionPanel: View {
                 switch element {
                 case .image(let f): ImagePanel(state: state, frame: f)
                 case .text(let f):  TextPanel(state: state, frame: f)
+                case .shape(let f): ShapePanel(state: state, frame: f)
                 }
             }
         }
@@ -676,6 +678,89 @@ private struct TextPanel: View {
             set: { newValue in
                 state.beginUndoGroup()
                 state.updateSelected { if case .text(var f) = $0 { f[keyPath: keyPath] = newValue; $0 = .text(f) } }
+            }
+        )
+    }
+}
+
+
+// MARK: - 図形
+
+private struct ShapePanel: View {
+    @ObservedObject var state: AppState
+    let frame: ShapeFrame
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader("図形", icon: frame.kind.icon)
+
+            Picker("", selection: bind(\.kind)) {
+                ForEach(ShapeKind.allCases) { Label($0.label, systemImage: $0.icon).tag($0) }
+            }
+            .labelsHidden()
+
+            if frame.kind == .line {
+                Picker("向き", selection: Binding(
+                    get: { frame.isVerticalLine },
+                    set: { bind(\.lineVertical).wrappedValue = $0 })) {
+                        Text("横").tag(false)
+                        Text("縦").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .font(.system(size: 11))
+            }
+
+            if frame.kind != .line {
+                colorRow("塗り", bind(\.fill))
+                if frame.kind == .rectangle {
+                    SliderRow(label: "角丸", value: Binding(
+                        get: { Double(frame.cornerRadius) },
+                        set: { bind(\.cornerRadius).wrappedValue = CGFloat($0) }),
+                        range: 0...200, step: 1, format: "%.0f")
+                }
+            }
+
+            colorRow(frame.kind == .line ? "線の色" : "枠線", bind(\.stroke))
+            SliderRow(label: frame.kind == .line ? "太さ" : "枠線の太さ", value: Binding(
+                get: { Double(frame.strokeWidth) },
+                set: { bind(\.strokeWidth).wrappedValue = CGFloat($0) }),
+                range: 0...40, step: 0.25, format: "%.2f")
+
+            SliderRow(label: "不透明度", value: Binding(
+                get: { Double(frame.opacity) * 100 },
+                set: { bind(\.opacity).wrappedValue = CGFloat($0 / 100) }),
+                range: 0...100, step: 1, format: "%.0f", unit: "%")
+        }
+    }
+
+    private func colorRow(_ label: String, _ binding: Binding<RGBA?>) -> some View {
+        HStack(spacing: 8) {
+            Toggle(isOn: Binding(
+                get: { binding.wrappedValue != nil },
+                set: { on in binding.wrappedValue = on ? (binding.wrappedValue ?? state.settings.background.contrastingInk) : nil }
+            )) { Text(label).font(.system(size: 11)) }
+                .toggleStyle(.checkbox)
+            if let current = binding.wrappedValue {
+                ColorPicker("", selection: Binding(
+                    get: { Color(nsColor: NSColor(cgColor: current.cgColor) ?? .black) },
+                    set: { newValue in
+                        if let c = NSColor(newValue).usingColorSpace(.sRGB) {
+                            binding.wrappedValue = RGBA(r: c.redComponent, g: c.greenComponent,
+                                                        b: c.blueComponent, a: c.alphaComponent)
+                        }
+                    }))
+                    .labelsHidden()
+            }
+            Spacer()
+        }
+    }
+
+    private func bind<T>(_ keyPath: WritableKeyPath<ShapeFrame, T>) -> Binding<T> {
+        Binding(
+            get: { frame[keyPath: keyPath] },
+            set: { newValue in
+                state.beginUndoGroup()
+                state.updateSelected { if case .shape(var f) = $0 { f[keyPath: keyPath] = newValue; $0 = .shape(f) } }
             }
         )
     }

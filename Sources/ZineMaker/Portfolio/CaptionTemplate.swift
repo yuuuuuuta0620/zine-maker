@@ -16,6 +16,7 @@ enum CaptionTemplate {
         .init(key: "title",     label: "作品名（IPTC）"),
         .init(key: "caption",   label: "説明（IPTC）"),
         .init(key: "date",      label: "撮影日"),
+        .init(key: "date.dot",  label: "撮影日（2026.09.12）"),
         .init(key: "year",      label: "撮影年"),
         .init(key: "location",  label: "撮影地（IPTC）"),
         .init(key: "camera",    label: "カメラ"),
@@ -41,6 +42,8 @@ enum CaptionTemplate {
         .init(key: "series",       label: "シリーズ名"),
         .init(key: "series.subtitle", label: "シリーズ副題"),
         .init(key: "page",         label: "ページ番号"),
+        .init(key: "page.pad",     label: "ページ番号（0埋め2桁）"),
+        .init(key: "page.digits",  label: "ページ番号（1桁ずつ改行）"),
         .init(key: "pages",        label: "総ページ数"),
         .init(key: "index",        label: "作品一覧（自動生成）"),
     ]
@@ -63,6 +66,8 @@ enum CaptionTemplate {
         .init(name: "機材と撮影データ", template: "{camera} + {lens}\n{exposure}"),
         .init(name: "番号＋日付＋機材", template: "{plate}　{date}\n{camera} / {lens} / {exposure}"),
         .init(name: "ファイル名",     template: "{filename}"),
+        .init(name: "写真集スタイル（2行）",
+              template: "Day : {date.dot} / Location : {location}\nGear : {camera} / Lens : {lens} / Setting : {aperture} / {shutter} / {iso}"),
     ]
 
     // MARK: - 展開
@@ -89,6 +94,7 @@ enum CaptionTemplate {
             values["title"]    = m.title ?? asset.url.deletingPathExtension().lastPathComponent
             values["caption"]  = m.caption ?? ""
             values["date"]     = m.dateLabel() ?? ""
+            values["date.dot"] = m.dateLabel("yyyy.MM.dd") ?? ""
             values["year"]     = m.dateLabel("yyyy") ?? ""
             values["location"] = m.location ?? ""
             values["camera"]   = m.cameraLabel ?? ""
@@ -118,6 +124,10 @@ enum CaptionTemplate {
         values["series"]          = context.seriesTitle
         values["series.subtitle"] = context.seriesSubtitle
         values["page"]  = "\(context.pageNumber)"
+        let padded = String(format: "%02d", context.pageNumber)
+        values["page.pad"] = padded
+        // ノンブルを縦に積む（0 / 4 のように1桁ずつ改行する）
+        values["page.digits"] = padded.map(String.init).joined(separator: "\n")
         values["pages"] = "\(context.totalPages)"
         values["index"] = context.indexLines.joined(separator: "\n")
 

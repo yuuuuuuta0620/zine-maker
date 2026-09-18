@@ -61,6 +61,15 @@ struct ContentView: View {
             }
             .help("テキストを追加（⌘T）")
 
+            Menu {
+                ForEach(ShapeKind.allCases) { kind in
+                    Button { state.addShape(kind) } label: { Label(kind.label, systemImage: kind.icon) }
+                }
+            } label: {
+                Label("図形", systemImage: "square.on.circle")
+            }
+            .help("罫線や囲みを追加（罫線は ⌘⇧R）")
+
             Spacer()
 
             Button { state.undo() } label: { Label("取り消す", systemImage: "arrow.uturn.backward") }

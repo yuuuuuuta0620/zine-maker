@@ -197,9 +197,9 @@ struct TemplatePicker: View {
                                     .font(.system(size: 9).monospacedDigit())
                                     .foregroundStyle(.tertiary)
                             }
-                            .padding(6)
+                            .padding(7)
                             .frame(maxWidth: .infinity)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.4)))
+                            .glassControl(cornerRadius: 9)
                         }
                         .buttonStyle(.plain)
                     }

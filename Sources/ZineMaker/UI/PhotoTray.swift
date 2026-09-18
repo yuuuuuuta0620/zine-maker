@@ -22,7 +22,7 @@ struct PhotoTray: View {
             }
         }
         .frame(height: DS.trayHeight)
-        .background(.bar)
+        .glassBar()
         .onReceive(NotificationCenter.default.publisher(for: ImageStore.didLoad)) { _ in
             reloadTick &+= 1
         }

@@ -183,12 +183,25 @@ struct ZineMakerApp: App {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// ⌘W はまずタブを閉じる。タブが無くなったときだけウインドウを閉じる。
+    /// これをやらないと、システム側の「ウインドウを閉じる」に取られてアプリごと終わってしまう。
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        let store = DocumentStore.shared
+        guard !store.documents.isEmpty else { return true }
+        store.closeActive()
+        return false
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        // SwiftUI がウインドウを作り終えてから受け持つ
+        DispatchQueue.main.async { [weak self] in
+            NSApp.windows.first { $0.isVisible && $0.contentView != nil }?.delegate = self
+        }
 
         let store = DocumentStore.shared
         store.offerRecoveryIfNeeded()

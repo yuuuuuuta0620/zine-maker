@@ -101,6 +101,13 @@ private struct DisplaySettings: View {
                 Toggle("広色域で表示する（Display P3）", isOn: $prefs.wideGamutCanvas)
                 Text("このMacのディスプレイは P3 に対応しています。切るとsRGBに丸めて表示します。")
                     .font(.caption).foregroundStyle(.secondary)
+
+                Toggle("Liquid Glass を使う", isOn: $prefs.useLiquidGlass)
+                    .disabled(!GlassStyle.isAvailable)
+                Text(GlassStyle.isAvailable
+                     ? "浮いている操作やタブにガラスの質感を使います。キャンバスと写真には掛けません（色が転ぶため）。"
+                     : "この macOS では使えません。")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("画質") {
                 VStack(alignment: .leading) {

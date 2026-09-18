@@ -36,6 +36,7 @@ final class Preferences: ObservableObject {
     @AppStorage("snapEnabled") var snapEnabled = true
     @AppStorage("canvasBrightness") var canvasBrightness = 0.18
     @AppStorage("wideGamutCanvas") var wideGamutCanvas = true
+    @AppStorage("useLiquidGlass") var useLiquidGlass = true
     @AppStorage("screenQuality") var screenQuality = 1.0     // 0.5〜2.0 の倍率
 
     // 書き出し

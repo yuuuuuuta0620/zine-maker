@@ -93,19 +93,32 @@ struct ContentView: View {
             }
             .help("罫線や囲みを追加（罫線は ⌘⇧R）")
 
-            Spacer()
+        }
 
+        // Liquid Glass では、機能のまとまりごとに区切ると 島が分かれて見やすくなる
+        toolbarSpacer
+
+        ToolbarItemGroup {
             Button { state.undo() } label: { Label("取り消す", systemImage: "arrow.uturn.backward") }
                 .disabled(!state.canUndo)
             Button { state.redo() } label: { Label("やり直す", systemImage: "arrow.uturn.forward") }
                 .disabled(!state.canRedo)
+        }
 
-            Spacer()
+        toolbarSpacer
 
+        ToolbarItem {
             Button { showingExport = true } label: {
                 Label("書き出し", systemImage: "square.and.arrow.up")
             }
             .help("PDF・JPEG・PNG・AVIF などで書き出す（⌘E）")
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarSpacer: some ToolbarContent {
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed)
         }
     }
 
@@ -131,19 +144,24 @@ struct ContentView: View {
                 .controlSize(.small)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Color.orange.opacity(0.12))
+        .padding(.vertical, 7)
+        .glassPanel(cornerRadius: 0, tint: .orange)
         .overlay(alignment: .bottom) { Divider() }
     }
 
     private var statusBar: some View {
         HStack(spacing: 10) {
             if let progress = state.exportProgress {
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
-                    .frame(width: 110)
-                Text(String(format: "%.0f%%", progress * 100))
-                    .font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    ProgressView(value: progress)
+                        .progressViewStyle(.linear)
+                        .frame(width: 96)
+                    Text(String(format: "%.0f%%", progress * 100))
+                        .font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .glassPanel(cornerRadius: 9)
             } else if state.dirty {
                 Circle().fill(.orange).frame(width: 6, height: 6)
             }
@@ -192,9 +210,11 @@ struct CanvasContainer: View {
         }
         .buttonStyle(.borderless)
         .controlSize(.small)
-        .padding(5)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7))
-        .shadow(color: .black.opacity(0.2), radius: 3, y: 1)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .glassPanel(cornerRadius: 11)
+        .glassGroup(spacing: 10)
+        .shadow(color: .black.opacity(0.18), radius: 4, y: 1)
     }
 }
 

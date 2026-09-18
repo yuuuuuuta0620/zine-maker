@@ -35,6 +35,8 @@ struct DocumentTabBar: View {
     private let maxWidth: CGFloat = 190
     private let minWidth: CGFloat = 76
 
+    @Namespace private var glassNS
+
     var body: some View {
         HStack(spacing: 0) {
             ScrollViewReader { proxy in
@@ -46,6 +48,7 @@ struct DocumentTabBar: View {
                         }
                     }
                     .padding(.horizontal, 2)
+                    .glassGroup(spacing: 6)
                 }
                 .onChange(of: store.activeID) { _, id in
                     guard let id else { return }
@@ -62,6 +65,7 @@ struct DocumentTabBar: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .glassControl(cornerRadius: 7)
             .help("新しいドキュメント（⌘N）")
             .contextMenu {
                 Button("新規 ZINE") { store.newDocument(kind: .zine) }
@@ -128,15 +132,7 @@ struct DocumentTabBar: View {
         .padding(.leading, 9)
         .padding(.trailing, 4)
         .frame(width: tabWidth, height: height)
-        .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(isActive ? Color(nsColor: .controlBackgroundColor)
-                               : Color.primary.opacity(isHover ? 0.10 : 0.045))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(Color.primary.opacity(isActive ? 0.10 : 0), lineWidth: 0.5)
-        )
+        .tabSurface(isActive: isActive, isHover: isHover, id: doc.id, namespace: glassNS)
         .contentShape(Rectangle())
         .onTapGesture { store.select(doc) }
         .onHover { inside in hovering = inside ? doc.id : (hovering == doc.id ? nil : hovering) }
@@ -183,7 +179,7 @@ struct WelcomeView: View {
                     .font(.system(size: 12)).foregroundStyle(.secondary)
             }
 
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 start("ZINE・写真集", "book.closed", "見開き・塗り足し・入稿PDF") {
                     store.newDocument(kind: .zine)
                 }
@@ -191,6 +187,7 @@ struct WelcomeView: View {
                     store.newDocument(kind: .board)
                 }
             }
+            .glassGroup(spacing: 14)
 
             if !RecentDocuments.urls.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
@@ -212,6 +209,8 @@ struct WelcomeView: View {
                     }
                 }
                 .frame(width: 280)
+                .padding(12)
+                .glassPanel(cornerRadius: 12)
                 .padding(.top, 6)
             }
             Spacer()
@@ -228,9 +227,8 @@ struct WelcomeView: View {
                 Text(title).font(.system(size: 12, weight: .medium))
                 Text(detail).font(.system(size: 10)).foregroundStyle(.secondary)
             }
-            .frame(width: 168, height: 104)
-            .background(RoundedRectangle(cornerRadius: 9).fill(.quaternary.opacity(0.5)))
-            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.secondary.opacity(0.2)))
+            .frame(width: 176, height: 110)
+            .glassControl(cornerRadius: 14)
         }
         .buttonStyle(.plain)
     }

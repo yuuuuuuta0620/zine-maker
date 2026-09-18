@@ -21,7 +21,6 @@ struct PhotoTray: View {
                 strip
             }
         }
-        .frame(height: DS.trayHeight)
         .glassBar()
         .onReceive(NotificationCenter.default.publisher(for: ImageStore.didLoad)) { _ in
             reloadTick &+= 1
@@ -69,7 +68,7 @@ struct PhotoTray: View {
             Spacer()
         }
         .padding(.horizontal, 14)
-        .frame(maxHeight: .infinity)
+        .frame(height: DS.thumbSize.height + DS.thumbPadding * 2)
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             handleDrop(providers)
         }
@@ -121,8 +120,9 @@ struct PhotoTray: View {
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.vertical, DS.thumbPadding)
         }
+        .frame(height: DS.thumbSize.height + DS.thumbPadding * 2)
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in handleDrop(providers) }
     }
 
@@ -158,7 +158,7 @@ private struct PhotoThumb: View {
         let image = ImageStore.shared.thumbnail(at: asset.url, maxPixel: 256)
         ZStack(alignment: .topTrailing) {
             CGImageView(image: image, contentMode: .fill)
-                .frame(width: 74, height: 62)
+                .frame(width: DS.thumbSize.width, height: DS.thumbSize.height)
                 .clipShape(RoundedRectangle(cornerRadius: 5))
                 .overlay(
                     RoundedRectangle(cornerRadius: 5)

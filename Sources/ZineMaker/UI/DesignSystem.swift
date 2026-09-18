@@ -6,7 +6,10 @@ enum DS {
     static let gutter: CGFloat = 12
     static let sectionGap: CGFloat = 20
     static let inspectorWidth: CGFloat = 300
-    static let trayHeight: CGFloat = 108
+    /// 写真トレイのサムネイルの大きさ。トレイの高さはこれとヘッダーから決まる。
+    static let thumbSize = CGSize(width: 74, height: 62)
+    /// サムネイルの上下に取る余白
+    static let thumbPadding: CGFloat = 6
     static let corner: CGFloat = 8
 
     static let canvasBackground = Color(nsColor: .underPageBackgroundColor)

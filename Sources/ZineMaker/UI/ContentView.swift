@@ -11,6 +11,17 @@ struct ContentView: View {
     @ObservedObject private var prefs = Preferences.shared
 
     var body: some View {
+        // 状態バーは safeAreaInset ではなく VStack で積む。
+        // NavigationSplitView に safeAreaInset を掛けても中身の高さが減らず、
+        // 写真トレイの下がウインドウの外へはみ出してしまう。
+        VStack(spacing: 0) {
+            splitView
+            Divider()
+            statusBar
+        }
+    }
+
+    private var splitView: some View {
         NavigationSplitView {
             Sidebar(state: state)
                 .navigationSplitViewColumnWidth(min: 150, ideal: 168, max: 240)
@@ -31,7 +42,6 @@ struct ContentView: View {
         .sheet(isPresented: $showingExport) { ExportSheet(state: state) }
         .sheet(isPresented: $showingTemplates) { TemplatePicker(state: state) }
         .sheet(isPresented: $showingPreflight) { PreflightSheet(state: state) }
-        .safeAreaInset(edge: .bottom) { statusBar }
         .onReceive(NotificationCenter.default.publisher(for: .zineShowExport)) { _ in showingExport = true }
         .onReceive(NotificationCenter.default.publisher(for: .zineShowTemplates)) { _ in showingTemplates = true }
         .onReceive(NotificationCenter.default.publisher(for: .zineShowPreflight)) { _ in showingPreflight = true }
@@ -192,6 +202,7 @@ struct ContentView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
         .background(.bar)
+
     }
 }
 

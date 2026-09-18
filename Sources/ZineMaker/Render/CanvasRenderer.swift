@@ -225,7 +225,23 @@ enum CanvasRenderer {
             path.addLine(to: CGPoint(x: r.minX, y: r.minY))
             path.closeSubpath()
             return path
+        case .ribbon:
+            return ribbonPath(r)
         }
+    }
+
+    /// 両端が V 字に切り込まれた帯（しおり・リボン）
+    static func ribbonPath(_ r: CGRect, notch: CGFloat? = nil) -> CGPath {
+        let n = min(notch ?? r.height * 0.42, r.width / 2)
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: r.minX, y: r.maxY))
+        path.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
+        path.addLine(to: CGPoint(x: r.maxX - n, y: r.midY))
+        path.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+        path.addLine(to: CGPoint(x: r.minX, y: r.minY))
+        path.addLine(to: CGPoint(x: r.minX + n, y: r.midY))
+        path.closeSubpath()
+        return path
     }
 
     static func drawShape(_ frame: ShapeFrame, in ctx: CGContext) {
@@ -320,6 +336,7 @@ enum CanvasRenderer {
     static func drawText(_ frame: TextFrame, in ctx: CGContext, scene: Scene = .init()) {
         let text = resolvedText(for: frame, scene: scene)
         guard !text.isEmpty else { return }
+        drawPlate(frame, in: ctx)
         let framesetter = CTFramesetterCreateWithAttributedString(attributedString(for: frame, text: text))
         let path = CGPath(rect: frame.rect, transform: nil)
 
@@ -347,6 +364,31 @@ enum CanvasRenderer {
             if textOverflows(f, scene: scene) { hi = mid } else { lo = mid }
         }
         return lo
+    }
+
+    /// 文字の下に敷く地（べた帯・リボン・下線）
+    private static func drawPlate(_ frame: TextFrame, in ctx: CGContext) {
+        guard frame.plate != .none else { return }
+        let color = frame.plateColor ?? RGBA(r: 0, g: 0, b: 0, a: 0.55)
+        let pad = frame.platePadding
+        let r = frame.rect.insetBy(dx: -pad, dy: -pad)
+
+        ctx.saveGState()
+        ctx.setFillColor(color.cgColor)
+        switch frame.plate {
+        case .none:
+            break
+        case .block:
+            ctx.fill(r)
+        case .ribbon:
+            ctx.addPath(ribbonPath(r))
+            ctx.fillPath()
+        case .underline:
+            // 文字の下に1本。太さは文字サイズから決める
+            let w = max(frame.fontSize * 0.06, 0.3)
+            ctx.fill(CGRect(x: r.minX, y: frame.rect.minY - pad, width: r.width, height: w))
+        }
+        ctx.restoreGState()
     }
 
     /// テキストが枠に収まりきらないか（あふれ表示に使う）

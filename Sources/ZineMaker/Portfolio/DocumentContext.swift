@@ -6,6 +6,8 @@ import Foundation
 struct DocumentContext {
     var settings: DocSettings
     var meta: DocumentMeta
+    /// 作品一覧の各行の組み方
+    var indexTemplate: String = "{plate}　{title}"
     var series: [Series]
     var assets: [PhotoAsset]
     var boards: [Artboard]
@@ -70,12 +72,14 @@ struct DocumentContext {
     }
 
     /// 1ページ分の描画文脈
-    func scene(forBoardAt index: Int, indexTemplate: String = "{plate}　{title}") -> CanvasRenderer.Scene {
+    func scene(forBoardAt index: Int, indexTemplate: String? = nil) -> CanvasRenderer.Scene {
+        let indexTemplate = indexTemplate ?? self.indexTemplate
         var caption = CaptionTemplate.Context()
         caption.meta = meta
         caption.plateNumbers = plateNumbers
         caption.pageNumber = pageNumber(forBoardAt: index)
         caption.totalPages = totalPages
+        caption.pagesPerSpread = settings.pagesPerSpread
         if let s = seriesTitle(forBoardAt: index) {
             caption.seriesTitle = s.title
             caption.seriesSubtitle = s.subtitle
@@ -89,7 +93,8 @@ struct DocumentContext {
     }
 
     /// 全ページ分をまとめて作る（書き出し用。作品番号の走査を1回で済ませる）
-    func allScenes(indexTemplate: String = "{plate}　{title}") -> [CanvasRenderer.Scene] {
+    func allScenes(indexTemplate: String? = nil) -> [CanvasRenderer.Scene] {
+        let indexTemplate = indexTemplate ?? self.indexTemplate
         let plates = plateNumbers
         let index = assetIndex
         let total = totalPages
@@ -103,6 +108,7 @@ struct DocumentContext {
             caption.plateNumbers = plates
             caption.pageNumber = pageNumber(forBoardAt: i)
             caption.totalPages = total
+            caption.pagesPerSpread = settings.pagesPerSpread
             if let s = seriesTitle(forBoardAt: i) {
                 caption.seriesTitle = s.title
                 caption.seriesSubtitle = s.subtitle

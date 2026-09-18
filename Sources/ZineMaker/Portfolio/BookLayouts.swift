@@ -17,6 +17,7 @@ enum BookLayouts {
                              font: String = "HiraMinProN-W3", align: TextAlign = .left,
                              vertical: Bool = false, leading: CGFloat = 1.6,
                              tracking: CGFloat = 0, template: Bool = false,
+                             color: RGBA? = nil,
                              scene: CanvasRenderer.Scene = .init()) -> Element {
         var f = TextFrame(rect: rect)
         if template { f.template = body }
@@ -27,7 +28,7 @@ enum BookLayouts {
         f.vertical = vertical
         f.lineHeightScale = leading
         f.tracking = tracking * unit(s)
-        f.color = ink(s)
+        f.color = color ?? ink(s)
         // 枠に入らない大きさだと Core Text は1行も描かないので、入る大きさまで詰める。
         // 差し込み文は実データを入れないと長さが分からないので scene を渡す。
         f.fontSize = CanvasRenderer.fittedFontSize(for: f, scene: scene)
@@ -93,6 +94,12 @@ enum BookLayouts {
         .init(key: "label",    name: "1枚＋地名", detail: "写真の角に小さな地名ラベル", photoCount: 1),
         .init(key: "chapter",  name: "章扉", detail: "第N章・大見出し・ページ範囲・項目一覧", photoCount: 0),
         .init(key: "afterword", name: "あとがき", detail: "中央に本文だけ", photoCount: 0),
+        .init(key: "overlap",  name: "大＋小の重ね", detail: "大きな写真の角に小さな写真を重ねる", photoCount: 2),
+        .init(key: "strip",    name: "帯状に3枚", detail: "細長く切った3枚を横に並べる", photoCount: 3),
+        .init(key: "mosaic",   name: "大1＋小3", detail: "左に大きく1枚、右に小さく3枚", photoCount: 4),
+        .init(key: "bleedHalf", name: "片側裁ち落とし", detail: "片ページ全面、対向に小さく1枚", photoCount: 2),
+        .init(key: "ribbon",   name: "全面＋リボン", detail: "全面写真に撮影地のリボンを重ねる", photoCount: 1),
+        .init(key: "quote",    name: "全面＋大きな文字", detail: "全面写真に見出しを重ねる", photoCount: 1),
     ]
 
     static func make(_ key: String, settings s: DocSettings, photos: [UUID] = [],
@@ -109,6 +116,12 @@ enum BookLayouts {
         case "label":    return labelled(s, next(), title: title)
         case "chapter":  return chapter(s, title: title, subtitle: subtitle)
         case "afterword": return afterword(s, title: title)
+        case "overlap":  return overlap(s, next(), next(), scene: scene)
+        case "strip":    return strip(s, next(), next(), next())
+        case "mosaic":   return mosaic(s, next(), next(), next(), next())
+        case "bleedHalf": return bleedHalf(s, next(), next(), scene: scene)
+        case "ribbon":   return ribbon(s, next(), scene: scene)
+        case "quote":    return quote(s, next(), title: title, subtitle: subtitle)
         default:         return plate(s, next(), scene: scene)
         }
     }
@@ -240,6 +253,147 @@ enum BookLayouts {
                                "ここに本文を入れます。", size: 5.5, s: s, align: .center, leading: 2.6))
         b.elements.append(text(CGRect(x: box.minX, y: box.minY + box.height * 0.06, width: box.width, height: box.height * 0.06),
                                "{doc.author}", size: 5.5, s: s, align: .center, template: true))
+        return b
+    }
+
+    // MARK: - 凝った組み方
+
+    /// 大きな写真の角に小さな写真を重ねる
+    static func overlap(_ s: DocSettings, _ big: UUID?, _ small: UUID?,
+                        scene: CanvasRenderer.Scene = .init()) -> Artboard {
+        var b = Artboard(role: .content)
+        let trim = s.trimBox
+        let bigRect = CGRect(x: trim.minX, y: trim.minY + trim.height * 0.10,
+                             width: trim.width * 0.66, height: trim.height * 0.80)
+        b.elements.append(photo(bigRect, big, fit: .fill))
+        // 小さい方を右下に、大きい方へ少し掛ける
+        let sw = trim.width * 0.30, sh = sw * 0.72
+        let smallRect = CGRect(x: bigRect.maxX - sw * 0.28, y: trim.minY + trim.height * 0.06,
+                               width: sw, height: sh)
+        var sf = ImageFrame(rect: smallRect)
+        sf.assetID = small
+        sf.fitMode = .fill
+        sf.strokeWidth = unit(s) * 1.4
+        sf.strokeColor = s.background       // 紙色の縁で浮かせる
+        b.elements.append(.image(sf))
+        b.elements.append(plateCaption(CGRect(x: smallRect.minX, y: trim.minY + trim.height * 0.012,
+                                              width: sw, height: trim.height * 0.042),
+                                       assetID: small, s: s, align: .left, scene: scene))
+        return b
+    }
+
+    /// 細長く切った3枚を横に並べる
+    static func strip(_ s: DocSettings, _ a: UUID?, _ b2: UUID?, _ c: UUID?) -> Artboard {
+        var b = Artboard(role: .content)
+        let box = s.contentBox
+        let gap = box.width * 0.018
+        let w = (box.width - gap * 2) / 3
+        let h = box.height * 0.76
+        for (i, id) in [a, b2, c].enumerated() {
+            let r = CGRect(x: box.minX + (w + gap) * CGFloat(i), y: box.midY - h / 2 + box.height * 0.03,
+                           width: w, height: h)
+            b.elements.append(photo(r, id, fit: .fill))
+        }
+        b.elements.append(rule(CGRect(x: box.minX, y: box.midY - h / 2 - box.height * 0.04,
+                                      width: box.width, height: 1), s: s, weight: 0.3))
+        return b
+    }
+
+    /// 左に大きく1枚、右に小さく3枚
+    static func mosaic(_ s: DocSettings, _ big: UUID?, _ a: UUID?, _ b2: UUID?, _ c: UUID?) -> Artboard {
+        var b = Artboard(role: .content)
+        let box = s.contentBox
+        let gap = box.width * 0.016
+        let leftW = box.width * 0.56
+        b.elements.append(photo(CGRect(x: box.minX, y: box.minY, width: leftW, height: box.height), big, fit: .fill))
+        let rightW = box.width - leftW - gap
+        let cellH = (box.height - gap * 2) / 3
+        for (i, id) in [a, b2, c].enumerated() {
+            b.elements.append(photo(CGRect(x: box.maxX - rightW, y: box.maxY - cellH - (cellH + gap) * CGFloat(i),
+                                           width: rightW, height: cellH), id, fit: .fill))
+        }
+        return b
+    }
+
+    /// 片ページを全面に裁ち落とし、対向に小さく1枚
+    static func bleedHalf(_ s: DocSettings, _ bleedID: UUID?, _ smallID: UUID?,
+                          scene: CanvasRenderer.Scene = .init()) -> Artboard {
+        var b = Artboard(role: .content)
+        b.hidesMaster = true
+        let media = s.mediaBox, trim = s.trimBox
+        let split = s.pagesPerSpread == 2 ? trim.midX : trim.minX + trim.width * 0.55
+        b.elements.append(photo(CGRect(x: media.minX, y: media.minY,
+                                       width: split - media.minX, height: media.height), bleedID, fit: .fill))
+        let box = CGRect(x: split, y: trim.minY, width: trim.maxX - split, height: trim.height)
+            .insetBy(dx: s.margin, dy: s.margin)
+        let w = box.width * 0.78, h = w * 0.72
+        let r = CGRect(x: box.midX - w / 2, y: box.midY - h / 2, width: w, height: h)
+        b.elements.append(photo(r, smallID))
+        b.elements.append(plateCaption(CGRect(x: r.minX, y: r.minY - box.height * 0.10,
+                                              width: r.width, height: box.height * 0.075),
+                                       assetID: smallID, s: s, align: .left, scene: scene))
+        return b
+    }
+
+    /// 全面写真に撮影地のリボンを重ねる
+    static func ribbon(_ s: DocSettings, _ assetID: UUID?,
+                       scene: CanvasRenderer.Scene = .init()) -> Artboard {
+        var b = Artboard(role: .content)
+        b.hidesMaster = true
+        b.elements.append(photo(s.mediaBox, assetID, fit: .fill))
+        let trim = s.trimBox
+        let h = trim.height * 0.062
+        var t = TextFrame(rect: CGRect(x: trim.minX + trim.width * 0.07,
+                                       y: trim.minY + trim.height * 0.10,
+                                       width: trim.width * 0.32, height: h))
+        t.linkedAssetID = assetID
+        t.template = "{where}"
+        t.text = "{where}"
+        t.fontName = "HiraginoSans-W6"
+        t.fontSize = h * 0.44
+        t.alignment = .center
+        t.tracking = h * 0.07
+        t.color = .white
+        t.plate = .ribbon
+        t.plateColor = RGBA(r: 0.10, g: 0.10, b: 0.11, a: 0.82)
+        t.platePadding = h * 0.30
+        t.fontSize = CanvasRenderer.fittedFontSize(for: t, scene: scene)
+        b.elements.append(.text(t))
+        return b
+    }
+
+    /// 全面写真に見出しを重ねる
+    static func quote(_ s: DocSettings, _ assetID: UUID?, title: String, subtitle: String) -> Artboard {
+        var b = Artboard(role: .content)
+        b.hidesMaster = true
+        b.elements.append(photo(s.mediaBox, assetID, fit: .fill))
+        let trim = s.trimBox
+        var t = TextFrame(rect: CGRect(x: trim.minX + trim.width * 0.08, y: trim.minY + trim.height * 0.13,
+                                       width: trim.width * 0.44, height: trim.height * 0.22))
+        t.text = title.isEmpty ? "ここに一行" : title
+        t.fontName = "HiraMinProN-W6"
+        t.fontSize = 16 * unit(s)
+        t.lineHeightScale = 1.5
+        t.color = .white
+        // 写真の明るいところに重なっても読めるよう、薄い暗幕を敷く
+        t.plate = .block
+        t.plateColor = RGBA(r: 0.06, g: 0.06, b: 0.07, a: 0.38)
+        t.platePadding = unit(s) * 7
+        t.fontSize = CanvasRenderer.fittedFontSize(for: t)
+        b.elements.append(.text(t))
+        // 見出しの下に細い罫を1本
+        var line = ShapeFrame(rect: CGRect(x: t.rect.minX, y: t.rect.minY - unit(s) * 5,
+                                           width: t.rect.width * 0.5, height: 1), kind: .line)
+        line.fill = nil
+        line.stroke = RGBA(r: 1, g: 1, b: 1, a: 0.75)
+        line.strokeWidth = unit(s) * 0.35
+        b.elements.append(.shape(line))
+        if !subtitle.isEmpty {
+            b.elements.append(text(CGRect(x: trim.minX + trim.width * 0.08, y: trim.minY + trim.height * 0.07,
+                                          width: trim.width * 0.4, height: trim.height * 0.04),
+                                   subtitle, size: 4, s: s, tracking: 1.4,
+                                   color: RGBA(r: 1, g: 1, b: 1, a: 0.85)))
+        }
         return b
     }
 

@@ -289,8 +289,22 @@ enum BoardRole: String, Codable, CaseIterable, Identifiable {
 struct PhotoAsset: Codable, Identifiable, Equatable, Hashable {
     var id = UUID()
     var path: String
+    /// GPS から引いた地名。一度引けば保存され、以後はオフラインでも出る。
+    var placeShort: String?
+    var placeFull: String?
+
     var url: URL { URL(fileURLWithPath: path) }
     var name: String { url.lastPathComponent }
+
+    init(path: String) { self.path = path }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id         = c.value(.id, UUID())
+        path       = c.value(.path, "")
+        placeShort = c.value(.placeShort, String?.none)
+        placeFull  = c.value(.placeFull, String?.none)
+    }
 }
 
 // MARK: - 要素
@@ -341,6 +355,24 @@ struct ImageFrame: Codable, Identifiable, Equatable {
     }
 }
 
+/// テキストの下に敷く地。写真の上に載せる見出しやキャプションに使う。
+enum TextPlate: String, Codable, CaseIterable, Identifiable {
+    case none, block, ribbon, underline
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .none: "なし"; case .block: "べた帯"; case .ribbon: "リボン"; case .underline: "下線"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .none: "textformat"; case .block: "rectangle.fill"
+        case .ribbon: "bookmark.fill"; case .underline: "underline"
+        }
+    }
+}
+
 enum TextAlign: String, Codable, CaseIterable {
     case left, center, right, justified
     var label: String {
@@ -372,6 +404,12 @@ struct TextFrame: Codable, Identifiable, Equatable {
     var vertical: Bool = false
     var color: RGBA = .ink
 
+    /// 文字の下に敷く地
+    var plate: TextPlate = .none
+    var plateColor: RGBA?
+    /// 地を文字の周りにどれだけ広げるか（pt）
+    var platePadding: CGFloat = 0
+
     /// 差し込みの元になる写真。テンプレートと組で使う。
     var linkedAssetID: UUID?
     /// `{plate}` のような記号を含む差し込み文。nil なら `text` をそのまま出す。
@@ -399,24 +437,27 @@ struct TextFrame: Codable, Identifiable, Equatable {
         color           = c.value(.color, .ink)
         linkedAssetID   = c.value(.linkedAssetID, UUID?.none)
         template        = c.value(.template, String?.none)
+        plate           = c.value(.plate, .none)
+        plateColor      = c.value(.plateColor, RGBA?.none)
+        platePadding    = c.value(.platePadding, 0)
     }
 }
 
 /// 罫線・囲み・地色帯・図形。写真集では見出しの下線やサイドバーの帯として多用する。
 enum ShapeKind: String, Codable, CaseIterable, Identifiable {
-    case rectangle, ellipse, line, diamond, triangle
+    case rectangle, ellipse, line, diamond, triangle, ribbon
 
     var id: String { rawValue }
     var label: String {
         switch self {
         case .rectangle: "四角"; case .ellipse: "楕円"; case .line: "罫線"
-        case .diamond: "菱形"; case .triangle: "三角"
+        case .diamond: "菱形"; case .triangle: "三角"; case .ribbon: "リボン"
         }
     }
     var icon: String {
         switch self {
         case .rectangle: "rectangle"; case .ellipse: "circle"; case .line: "minus"
-        case .diamond: "diamond"; case .triangle: "triangle"
+        case .diamond: "diamond"; case .triangle: "triangle"; case .ribbon: "bookmark.fill"
         }
     }
 }

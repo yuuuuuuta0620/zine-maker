@@ -22,6 +22,15 @@ struct PhotoMetadata: Equatable {
     var location: String?
     var pixelSize: CGSize?
 
+    /// 撮影地の座標（EXIF GPS）
+    var latitude: Double?
+    var longitude: Double?
+    /// レンズが向いていた方角（真北から時計回り）
+    var direction: Double?
+    var altitude: Double?
+
+    var hasGPS: Bool { latitude != nil && longitude != nil }
+
     // MARK: 表示用の整形
 
     var cameraLabel: String? {
@@ -50,6 +59,33 @@ struct PhotoMetadata: Equatable {
     }
 
     var isoLabel: String? { iso.map { "ISO \($0)" } }
+
+    /// 35.65023, 139.69627
+    var coordinateLabel: String? {
+        guard let latitude, let longitude else { return nil }
+        return String(format: "%.5f, %.5f", latitude, longitude)
+    }
+
+    /// N35°39'01" E139°41'47"
+    var coordinateDMS: String? {
+        guard let latitude, let longitude else { return nil }
+        func dms(_ v: Double, _ pos: String, _ neg: String) -> String {
+            let a = abs(v)
+            let d = Int(a), m = Int((a - Double(d)) * 60)
+            let sec = ((a - Double(d)) * 60 - Double(m)) * 60
+            return String(format: "%@%d°%02d'%02d\"", v >= 0 ? pos : neg, d, m, Int(sec.rounded()))
+        }
+        return "\(dms(latitude, "N", "S")) \(dms(longitude, "E", "W"))"
+    }
+
+    /// 北北東 のような16方位
+    var directionLabel: String? {
+        guard let direction else { return nil }
+        let names = ["北", "北北東", "北東", "東北東", "東", "東南東", "南東", "南南東",
+                     "南", "南南西", "南西", "西南西", "西", "西北西", "北西", "北北西"]
+        let i = Int((direction.truncatingRemainder(dividingBy: 360) / 22.5).rounded()) % 16
+        return names[i]
+    }
 
     func dateLabel(_ format: String = "yyyy年M月d日") -> String? {
         guard let d = captureDate else { return nil }
@@ -109,6 +145,23 @@ extension ImageStore {
                 f.dateFormat = "yyyy:MM:dd HH:mm:ss"
                 f.locale = Locale(identifier: "en_US_POSIX")
                 m.captureDate = f.date(from: raw)
+            }
+
+            // GPS。撮影地を出すのに使う
+            if let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any] {
+                if let lat = gps[kCGImagePropertyGPSLatitude] as? Double {
+                    let ref = (gps[kCGImagePropertyGPSLatitudeRef] as? String) ?? "N"
+                    m.latitude = ref == "S" ? -lat : lat
+                }
+                if let lon = gps[kCGImagePropertyGPSLongitude] as? Double {
+                    let ref = (gps[kCGImagePropertyGPSLongitudeRef] as? String) ?? "E"
+                    m.longitude = ref == "W" ? -lon : lon
+                }
+                m.direction = gps[kCGImagePropertyGPSImgDirection] as? Double
+                if let alt = gps[kCGImagePropertyGPSAltitude] as? Double {
+                    let ref = (gps[kCGImagePropertyGPSAltitudeRef] as? Int) ?? 0
+                    m.altitude = ref == 1 ? -alt : alt
+                }
             }
 
             let iptc = props[kCGImagePropertyIPTCDictionary] as? [CFString: Any] ?? [:]

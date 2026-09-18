@@ -88,6 +88,9 @@ struct ZineMakerApp: App {
             Divider()
             Button("シリーズを追加") { state.addSeries() }
             Divider()
+            Button("GPSから撮影地を調べる") { state.resolvePlaces() }
+            Button("撮影地をリボンで重ねる") { state.addPlaceRibbons() }
+            Divider()
             Button("写真にキャプションを付ける") {
                 state.addCaptions(template: CaptionTemplate.presets[1].template)
             }

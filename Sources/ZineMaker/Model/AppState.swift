@@ -799,6 +799,67 @@ final class AppState: ObservableObject {
         status = "\(i - currentIndex) ページをまとめました"
     }
 
+    // MARK: 撮影地
+
+    /// GPS を持つ写真の地名をまとめて引いて、アセットに保存する。
+    /// 同じ座標はまとめて1回しか問い合わせない。一度引けば .zine に残る。
+    func resolvePlaces() {
+        let targets = assets.filter { ImageStore.shared.metadata(of: $0.url).hasGPS }
+        guard !targets.isEmpty else { status = "GPSを持つ写真がありません"; return }
+        status = "撮影地を調べています…"
+        PlaceResolver.resolve(targets, progress: { [weak self] i, n in
+            DispatchQueue.main.async { self?.status = "撮影地を調べています… \(i + 1)/\(n) 地点" }
+        }) { [weak self] places in
+            guard let self else { return }
+            guard !places.isEmpty else { self.status = "撮影地を取得できませんでした（ネットワークを確認してください）"; return }
+            self.beginUndoGroup()
+            for i in self.assets.indices {
+                if let p = places[self.assets[i].id] {
+                    self.assets[i].placeShort = p.short
+                    self.assets[i].placeFull = p.full
+                }
+            }
+            self.dirty = true
+            let names = Set(places.values.map(\.short)).sorted()
+            self.status = "撮影地: \(names.joined(separator: " / "))"
+        }
+    }
+
+    /// 撮影地をリボンで写真に重ねる
+    func addPlaceRibbons() {
+        beginUndoGroup()
+        let targets = selection.isEmpty
+            ? currentBoard.imageFrames.filter { $0.assetID != nil }
+            : selectedElements.compactMap(\.imageFrame).filter { $0.assetID != nil }
+        guard !targets.isEmpty else { status = "写真の入った枠がありません"; return }
+
+        var board = currentBoard
+        var added: Set<UUID> = []
+        for frame in targets {
+            let h = max(frame.rect.height * 0.075, settings.kind == .zine ? Pt.fromMM(6) : 34)
+            let w = min(frame.rect.width * 0.62, frame.rect.width - h)
+            var t = TextFrame(rect: CGRect(x: frame.rect.minX + h * 0.5,
+                                           y: frame.rect.minY + h * 0.7,
+                                           width: w, height: h))
+            t.linkedAssetID = frame.assetID
+            t.template = "{where}"
+            t.text = "{where}"
+            t.fontName = "HiraginoSans-W6"
+            t.fontSize = h * 0.42
+            t.alignment = .center
+            t.tracking = h * 0.06
+            t.color = .white
+            t.plate = .ribbon
+            t.plateColor = RGBA(r: 0.10, g: 0.10, b: 0.11, a: 0.82)
+            t.platePadding = h * 0.28
+            added.insert(t.id)
+            board.elements.append(.text(t))
+        }
+        currentBoard = board
+        selection = added
+        status = "\(added.count) 枚にリボンを付けました"
+    }
+
     // MARK: キャプション
 
     /// 選択中（なければページ全体）の写真枠に、紐づいたキャプション枠を付ける

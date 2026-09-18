@@ -19,6 +19,12 @@ enum CaptionTemplate {
         .init(key: "date.dot",  label: "撮影日（2026.09.12）"),
         .init(key: "year",      label: "撮影年"),
         .init(key: "location",  label: "撮影地（IPTC）"),
+        .init(key: "place",     label: "撮影地（GPSから）"),
+        .init(key: "place.full", label: "撮影地（GPSから・詳しく）"),
+        .init(key: "gps",       label: "座標"),
+        .init(key: "gps.dms",   label: "座標（度分秒）"),
+        .init(key: "direction", label: "レンズの方角"),
+        .init(key: "where",     label: "撮影地（GPS→IPTCの順に拾う）"),
         .init(key: "camera",    label: "カメラ"),
         .init(key: "lens",      label: "レンズ"),
         .init(key: "focal",     label: "焦点距離"),
@@ -44,6 +50,8 @@ enum CaptionTemplate {
         .init(key: "page",         label: "ページ番号"),
         .init(key: "page.pad",     label: "ページ番号（0埋め2桁）"),
         .init(key: "page.digits",  label: "ページ番号（1桁ずつ改行）"),
+        .init(key: "page.recto",   label: "見開きの右ページ番号"),
+        .init(key: "page.recto.pad", label: "見開きの右ページ番号（0埋め）"),
         .init(key: "pages",        label: "総ページ数"),
         .init(key: "index",        label: "作品一覧（自動生成）"),
     ]
@@ -66,6 +74,9 @@ enum CaptionTemplate {
         .init(name: "機材と撮影データ", template: "{camera} + {lens}\n{exposure}"),
         .init(name: "番号＋日付＋機材", template: "{plate}　{date}\n{camera} / {lens} / {exposure}"),
         .init(name: "ファイル名",     template: "{filename}"),
+        .init(name: "撮影地",         template: "{where}"),
+        .init(name: "撮影地＋日付",   template: "{where}　{date.dot}"),
+        .init(name: "番号＋撮影地",   template: "{plate}　{where}"),
         .init(name: "写真集スタイル（2行）",
               template: "Day : {date.dot} / Location : {location}\nGear : {camera} / Lens : {lens} / Setting : {aperture} / {shutter} / {iso}"),
     ]
@@ -84,6 +95,8 @@ enum CaptionTemplate {
         /// 作品一覧（{index} に差し込む行）
         var indexLines: [String] = []
         var platePadding: Int = 2
+        /// 見開きなら 2。右ページの番号を出すのに使う
+        var pagesPerSpread: Int = 1
     }
 
     static func render(_ template: String, asset: PhotoAsset?, context: Context) -> String {
@@ -97,6 +110,13 @@ enum CaptionTemplate {
             values["date.dot"] = m.dateLabel("yyyy.MM.dd") ?? ""
             values["year"]     = m.dateLabel("yyyy") ?? ""
             values["location"] = m.location ?? ""
+            values["place"]     = asset.placeShort ?? ""
+            values["place.full"] = asset.placeFull ?? ""
+            values["gps"]       = m.coordinateLabel ?? ""
+            values["gps.dms"]   = m.coordinateDMS ?? ""
+            values["direction"] = m.directionLabel ?? ""
+            // GPS があればそれを、無ければ IPTC を使う
+            values["where"]     = asset.placeShort ?? m.location ?? ""
             values["camera"]   = m.cameraLabel ?? ""
             values["lens"]     = m.lens ?? ""
             values["focal"]    = m.focalLabel ?? ""
@@ -128,6 +148,10 @@ enum CaptionTemplate {
         values["page.pad"] = padded
         // ノンブルを縦に積む（0 / 4 のように1桁ずつ改行する）
         values["page.digits"] = padded.map(String.init).joined(separator: "\n")
+        // 見開きでは左ページが {page}、右ページがこちら
+        let recto = context.pageNumber + max(context.pagesPerSpread - 1, 0)
+        values["page.recto"] = "\(recto)"
+        values["page.recto.pad"] = String(format: "%02d", recto)
         values["pages"] = "\(context.totalPages)"
         values["index"] = context.indexLines.joined(separator: "\n")
 

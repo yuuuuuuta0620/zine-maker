@@ -601,6 +601,28 @@ private struct TextPanel: View {
             }
 
             Divider()
+            SectionHeader("下に敷く地", icon: "bookmark")
+            IconPicker(selection: bind(\.plate),
+                       options: TextPlate.allCases.map { ($0, $0.icon, $0.label) })
+            if frame.plate != .none {
+                HStack(spacing: 8) {
+                    ColorPicker("地の色", selection: Binding(
+                        get: { Color(nsColor: NSColor(cgColor: (frame.plateColor ?? RGBA(r: 0, g: 0, b: 0, a: 0.55)).cgColor) ?? .black) },
+                        set: { newValue in
+                            if let c = NSColor(newValue).usingColorSpace(.sRGB) {
+                                bind(\.plateColor).wrappedValue = RGBA(r: c.redComponent, g: c.greenComponent,
+                                                                       b: c.blueComponent, a: c.alphaComponent)
+                            }
+                        }))
+                        .font(.system(size: 11))
+                }
+                SliderRow(label: "余白", value: Binding(
+                    get: { Double(frame.platePadding) },
+                    set: { bind(\.platePadding).wrappedValue = CGFloat($0) }),
+                    range: 0...60, step: 0.5, format: "%.1f")
+            }
+
+            Divider()
             captionSection
 
             ColorPicker("文字色", selection: Binding(

@@ -237,7 +237,12 @@ struct PagePanel: View {
             VStack(alignment: .leading, spacing: 8) {
                 SectionHeader("キャプション", icon: "text.below.photo")
                 CaptionTemplateField(template: $captionTemplate)
-                Button("このページの写真に付ける") { state.addCaptions(template: captionTemplate) }
+                HStack(spacing: 6) {
+                    Button("このページの写真に付ける") { state.addCaptions(template: captionTemplate) }
+                    Button("リボンで重ねる") { state.addPlaceRibbons() }
+                }
+                .controlSize(.small)
+                Button("GPSから撮影地を調べる") { state.resolvePlaces() }
                     .controlSize(.small)
                 Text("写真に紐づくので、あとで写真を差し替えても文面が追従します。")
                     .font(.system(size: 10)).foregroundStyle(.tertiary)

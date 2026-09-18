@@ -292,11 +292,17 @@ struct PhotoAsset: Codable, Identifiable, Equatable, Hashable {
     /// GPS から引いた地名。一度引けば保存され、以後はオフラインでも出る。
     var placeShort: String?
     var placeFull: String?
+    /// ファイルへのブックマーク。写真を移動・改名しても追えるようにする。
+    /// サンドボックスを有効にしたときのアクセス権もこれで持つ。
+    var bookmark: Data?
 
     var url: URL { URL(fileURLWithPath: path) }
     var name: String { url.lastPathComponent }
 
-    init(path: String) { self.path = path }
+    init(path: String) {
+        self.path = path
+        bookmark = PhotoAsset.makeBookmark(URL(fileURLWithPath: path))
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -304,6 +310,51 @@ struct PhotoAsset: Codable, Identifiable, Equatable, Hashable {
         path       = c.value(.path, "")
         placeShort = c.value(.placeShort, String?.none)
         placeFull  = c.value(.placeFull, String?.none)
+        bookmark   = c.value(.bookmark, Data?.none)
+    }
+
+    static func makeBookmark(_ url: URL) -> Data? {
+        // サンドボックス下では security scope 付き、そうでなければ通常のブックマーク
+        if let d = try? url.bookmarkData(options: .withSecurityScope,
+                                         includingResourceValuesForKeys: nil, relativeTo: nil) {
+            return d
+        }
+        return try? url.bookmarkData(includingResourceValuesForKeys: nil, relativeTo: nil)
+    }
+
+    /// ブックマークから現在の場所を引き直す。動いていれば true を返す。
+    @discardableResult
+    mutating func resolveFromBookmark() -> Bool {
+        guard let bookmark else { return false }
+        var stale = false
+        let scoped = (try? URL(resolvingBookmarkData: bookmark, options: .withSecurityScope,
+                               relativeTo: nil, bookmarkDataIsStale: &stale))
+        let plain = scoped ?? (try? URL(resolvingBookmarkData: bookmark,
+                                        relativeTo: nil, bookmarkDataIsStale: &stale))
+        guard let resolved = plain, resolved.path != path,
+              FileManager.default.fileExists(atPath: resolved.path) else { return false }
+        path = resolved.path
+        if stale { self.bookmark = PhotoAsset.makeBookmark(resolved) }
+        return true
+    }
+
+    /// サンドボックス下で読むために必要。使い終わったら stopAccessing を呼ぶ。
+    @discardableResult
+    func startAccessing() -> Bool {
+        guard let bookmark else { return false }
+        var stale = false
+        guard let url = try? URL(resolvingBookmarkData: bookmark, options: .withSecurityScope,
+                                 relativeTo: nil, bookmarkDataIsStale: &stale) else { return false }
+        return url.startAccessingSecurityScopedResource()
+    }
+
+    func stopAccessing() {
+        guard let bookmark else { return }
+        var stale = false
+        if let url = try? URL(resolvingBookmarkData: bookmark, options: .withSecurityScope,
+                              relativeTo: nil, bookmarkDataIsStale: &stale) {
+            url.stopAccessingSecurityScopedResource()
+        }
     }
 }
 

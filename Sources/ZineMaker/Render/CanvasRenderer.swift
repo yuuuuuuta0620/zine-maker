@@ -39,6 +39,15 @@ enum CanvasRenderer {
         var hairline: CGFloat = 0.5
         /// 背景を塗るか（PNG を透過で出したいときだけ false）
         var drawBackground = true
+        /// 色をこの空間に変換してから塗る（CMYK入稿など）。nil ならそのまま。
+        var colorSpace: CGColorSpace?
+        /// 写真をこの空間に変換してから埋める
+        var imageProfile: ColorProfile?
+    }
+
+    /// 出力先の色空間に合わせた色を返す
+    static func color(_ c: RGBA, _ options: Options) -> CGColor {
+        ColorConvert.cgColor(c, in: options.colorSpace)
     }
 
     // MARK: - 本体
@@ -53,7 +62,7 @@ enum CanvasRenderer {
         let assets = scene.assets
         ctx.saveGState()
         if options.drawBackground {
-            ctx.setFillColor(settings.background.cgColor)
+            ctx.setFillColor(color(settings.background, options))
             ctx.fill(settings.mediaBox)
         }
 
@@ -68,8 +77,8 @@ enum CanvasRenderer {
             if element.rotation != 0 { ctx.concatenate(element.transform) }
             switch element {
             case .image(let frame): drawImage(frame, assets: assets, in: ctx, options: options)
-            case .text(let frame):  drawText(frame, in: ctx, scene: scene)
-            case .shape(let frame): drawShape(frame, in: ctx)
+            case .text(let frame):  drawText(frame, in: ctx, scene: scene, options: options)
+            case .shape(let frame): drawShape(frame, in: ctx, options: options)
             }
             ctx.restoreGState()
         }
@@ -104,10 +113,16 @@ enum CanvasRenderer {
             let needed = max(target.width, target.height) / 72.0 * CGFloat(dpi)
             let original = max(pixelSize.width, pixelSize.height)
             let decoded = ImageStore.shared.image(at: asset.url, maxPixel: Int(ceil(min(needed, original))))
-            if let decoded, let q = jpegQuality {
-                cg = ImageStore.jpegBacked(decoded, quality: q) ?? decoded
+            var prepared = decoded
+            // CMYK 入稿などでは写真も変換してから埋める
+            if let prepared2 = prepared, let profile = options.imageProfile,
+               let space = profile.colorSpace, space.model != .rgb || profile != .sRGB {
+                prepared = ColorConvert.convert(prepared2, to: space, profile: profile) ?? prepared2
+            }
+            if let prepared, let q = jpegQuality {
+                cg = ImageStore.jpegBacked(prepared, quality: q) ?? prepared
             } else {
-                cg = decoded
+                cg = prepared
             }
         }
 
@@ -244,7 +259,7 @@ enum CanvasRenderer {
         return path
     }
 
-    static func drawShape(_ frame: ShapeFrame, in ctx: CGContext) {
+    static func drawShape(_ frame: ShapeFrame, in ctx: CGContext, options: Options = .init()) {
         guard frame.rect.width > 0 || frame.rect.height > 0 else { return }
         let path = shapePath(frame)
 
@@ -254,7 +269,7 @@ enum CanvasRenderer {
         // 罫線は塗らない（線だけ）
         if frame.kind != .line, let fill = frame.fill {
             ctx.addPath(path)
-            ctx.setFillColor(fill.cgColor)
+            ctx.setFillColor(color(fill, options))
             ctx.fillPath()
         }
 
@@ -262,7 +277,7 @@ enum CanvasRenderer {
         let lineWidth = frame.kind == .line && frame.strokeWidth <= 0 ? 0.5 : frame.strokeWidth
         if let lineColor, lineWidth > 0 {
             ctx.addPath(path)
-            ctx.setStrokeColor(lineColor.cgColor)
+            ctx.setStrokeColor(color(lineColor, options))
             ctx.setLineWidth(lineWidth)
             ctx.setLineCap(.butt)
             ctx.strokePath()
@@ -285,14 +300,15 @@ enum CanvasRenderer {
         attributedString(for: frame, text: resolvedText(for: frame, scene: scene))
     }
 
-    static func attributedString(for frame: TextFrame, text: String) -> NSAttributedString {
+    static func attributedString(for frame: TextFrame, text: String,
+                                 options: Options = .init()) -> NSAttributedString {
         let font = CTFontCreateWithName(frame.fontName as CFString, frame.fontSize, nil)
         let style = makeParagraphStyle(alignment: frame.alignment,
                                        lineHeight: frame.fontSize * frame.lineHeightScale)
 
         var attrs: [NSAttributedString.Key: Any] = [
             NSAttributedString.Key(kCTFontAttributeName as String): font,
-            NSAttributedString.Key(kCTForegroundColorAttributeName as String): frame.color.cgColor,
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): color(frame.color, options),
             NSAttributedString.Key(kCTParagraphStyleAttributeName as String): style,
         ]
         if frame.tracking != 0 {
@@ -333,11 +349,13 @@ enum CanvasRenderer {
         }
     }
 
-    static func drawText(_ frame: TextFrame, in ctx: CGContext, scene: Scene = .init()) {
+    static func drawText(_ frame: TextFrame, in ctx: CGContext, scene: Scene = .init(),
+                         options: Options = .init()) {
         let text = resolvedText(for: frame, scene: scene)
         guard !text.isEmpty else { return }
-        drawPlate(frame, in: ctx)
-        let framesetter = CTFramesetterCreateWithAttributedString(attributedString(for: frame, text: text))
+        drawPlate(frame, in: ctx, options: options)
+        let framesetter = CTFramesetterCreateWithAttributedString(
+            attributedString(for: frame, text: text, options: options))
         let path = CGPath(rect: frame.rect, transform: nil)
 
         var frameAttrs: [CFString: Any] = [:]
@@ -367,14 +385,15 @@ enum CanvasRenderer {
     }
 
     /// 文字の下に敷く地（べた帯・リボン・下線）
-    private static func drawPlate(_ frame: TextFrame, in ctx: CGContext) {
+    private static func drawPlate(_ frame: TextFrame, in ctx: CGContext, options: Options = .init()) {
         guard frame.plate != .none else { return }
-        let color = frame.plateColor ?? RGBA(r: 0, g: 0, b: 0, a: 0.55)
+        let plateColor = frame.plateColor ?? RGBA(r: 0, g: 0, b: 0, a: 0.55)
+        let color = ColorConvert.cgColor(plateColor, in: options.colorSpace)
         let pad = frame.platePadding
         let r = frame.rect.insetBy(dx: -pad, dy: -pad)
 
         ctx.saveGState()
-        ctx.setFillColor(color.cgColor)
+        ctx.setFillColor(color)
         switch frame.plate {
         case .none:
             break

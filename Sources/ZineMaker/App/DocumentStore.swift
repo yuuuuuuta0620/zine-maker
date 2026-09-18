@@ -11,6 +11,7 @@ final class DocumentStore: ObservableObject {
     @Published var activeID: UUID?
 
     private var cancellables: [UUID: AnyCancellable] = [:]
+    private var autosaveTimer: Timer?
 
     var active: AppState? {
         documents.first { $0.id == activeID } ?? documents.first
@@ -18,7 +19,53 @@ final class DocumentStore: ObservableObject {
 
     var hasUnsaved: Bool { documents.contains { $0.dirty } }
 
-    init() {}
+    init() {
+        Autosave.markRunning()
+        autosaveTimer = Timer.scheduledTimer(withTimeInterval: Autosave.interval, repeats: true) { [weak self] _ in
+            self?.autosaveDirty()
+        }
+    }
+
+    deinit { autosaveTimer?.invalidate() }
+
+    // MARK: - 自動保存
+
+    /// 変更のあるドキュメントを控えに書く。保存とは別で、元のファイルには触らない。
+    func autosaveDirty() {
+        for doc in documents where doc.dirty {
+            Autosave.write(doc.snapshotFile, id: doc.id, name: doc.displayName, original: doc.fileURL)
+        }
+    }
+
+    /// 前回落ちていたら、控えから戻すか尋ねる
+    func offerRecoveryIfNeeded() {
+        let entries = Autosave.entries
+        guard Autosave.crashedLastTime, !entries.isEmpty else {
+            Autosave.clearAll()
+            Autosave.markRunning()
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "前回の作業が残っています"
+        alert.informativeText = entries.count == 1
+            ? "「\(entries[0].name)」の未保存の変更が見つかりました。開き直しますか？"
+            : "\(entries.count) 件の未保存の変更が見つかりました。開き直しますか？"
+        alert.addButton(withTitle: "開き直す")
+        alert.addButton(withTitle: "破棄する")
+        alert.alertStyle = .informational
+        if alert.runModal() == .alertFirstButtonReturn {
+            for entry in entries {
+                guard let data = try? Data(contentsOf: entry.fileURL),
+                      let file = try? JSONDecoder().decode(ZineFile.self, from: data) else { continue }
+                let doc = AppState()
+                doc.restore(file, from: entry.original)
+                attach(doc)
+                doc.status = "前回の作業から復帰しました"
+            }
+        }
+        Autosave.clearAll()
+        Autosave.markRunning()
+    }
 
     // MARK: - 開く・作る
 
@@ -72,6 +119,7 @@ final class DocumentStore: ObservableObject {
             }
         }
         cancellables[doc.id] = nil
+        Autosave.remove(id: doc.id)
         let index = documents.firstIndex { $0.id == doc.id }
         documents.removeAll { $0.id == doc.id }
         if activeID == doc.id {

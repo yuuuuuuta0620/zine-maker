@@ -57,6 +57,12 @@ final class CanvasView: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    deinit {
+        // 通知は自動で外れるが、明示しておくほうが追いやすい
+        NotificationCenter.default.removeObserver(self)
+        cancellables.removeAll()
+    }
+
     @objc private func imagesLoaded() { needsDisplay = true }
 
     private func observe() {

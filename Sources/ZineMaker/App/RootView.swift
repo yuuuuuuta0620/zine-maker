@@ -7,13 +7,13 @@ struct RootView: View {
     @ObservedObject var prefs = Preferences.shared
 
     var body: some View {
-        VStack(spacing: 0) {
-            if !store.documents.isEmpty {
-                DocumentTabBar(store: store)
-                Divider()
-            }
+        Group {
             if let active = store.active {
-                ContentView(state: active)
+                // NavigationSplitView はウインドウ直下に置く。
+                // VStack で挟むとツールバーぶんの余白が二重に入り、
+                // インスペクタの上に隙間ができてしまう。
+                // タブはブラウザと同じくツールバー行に出す。
+                ContentView(state: active, store: store)
                     .id(active.id)
             } else {
                 WelcomeView(store: store)
@@ -25,22 +25,45 @@ struct RootView: View {
 
 // MARK: - タブ列
 
+/// ブラウザのタブに寄せた見た目。
+/// 選択中は明るい面で浮かせ、それ以外は地に沈める。枚数が増えると幅が縮む。
 struct DocumentTabBar: View {
     @ObservedObject var store: DocumentStore
     @State private var hovering: UUID?
 
+    private let height: CGFloat = 26
+    private let maxWidth: CGFloat = 190
+    private let minWidth: CGFloat = 76
+
     var body: some View {
         HStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 1) {
-                    ForEach(store.documents) { doc in
-                        tab(doc)
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 2) {
+                        ForEach(Array(store.documents.enumerated()), id: \.element.id) { index, doc in
+                            tab(doc, index: index)
+                                .id(doc.id)
+                        }
                     }
+                    .padding(.horizontal, 2)
                 }
-                .padding(.horizontal, 6)
+                .onChange(of: store.activeID) { _, id in
+                    guard let id else { return }
+                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) }
+                }
             }
-            Divider().frame(height: 18)
-            Menu {
+
+            Button {
+                store.newDocument()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(width: 26, height: height)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("新しいドキュメント（⌘N）")
+            .contextMenu {
                 Button("新規 ZINE") { store.newDocument(kind: .zine) }
                 Button("新規 組写真") { store.newDocument(kind: .board) }
                 Divider()
@@ -50,68 +73,81 @@ struct DocumentTabBar: View {
                         ForEach(RecentDocuments.urls, id: \.self) { url in
                             Button(url.deletingPathExtension().lastPathComponent) { store.open(url) }
                         }
-                        Divider()
-                        Button("メニューをクリア") { RecentDocuments.clear() }
                     }
                 }
-            } label: {
-                Image(systemName: "plus")
-            } primaryAction: {
-                store.newDocument()
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 34)
-            .help("新しいドキュメント（⌘N）")
         }
-        .frame(height: 34)
-        .background(.bar)
+        .frame(height: height)
+        .frame(maxWidth: 760)
     }
 
-    private func tab(_ doc: AppState) -> some View {
+    /// タブが増えるほど幅を詰める
+    private var tabWidth: CGFloat {
+        let n = CGFloat(max(store.documents.count, 1))
+        return max(minWidth, min(maxWidth, 700 / n))
+    }
+
+    private func tab(_ doc: AppState, index: Int) -> some View {
+        _ = index
         let isActive = doc.id == store.activeID
+        let isHover = hovering == doc.id
         return HStack(spacing: 5) {
             Image(systemName: doc.settings.kind.icon)
-                .font(.system(size: 9))
+                .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+
             Text(doc.displayName)
-                .font(.system(size: 11, weight: isActive ? .medium : .regular))
+                .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                .foregroundStyle(isActive ? Color.primary : Color.primary.opacity(0.72))
                 .lineLimit(1)
-            if doc.dirty {
-                Circle().fill(.orange).frame(width: 5, height: 5)
+                .truncationMode(.tail)
+
+            Spacer(minLength: 0)
+
+            // 閉じる。触っていないときは未保存の点だけ出す
+            ZStack {
+                if isHover || isActive {
+                    Button { _ = store.close(doc) } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 15, height: 15)
+                            .background(
+                                Circle().fill(Color.primary.opacity(isHover ? 0.10 : 0))
+                            )
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("タブを閉じる（⌘W）")
+                } else if doc.dirty {
+                    Circle().fill(.secondary).frame(width: 6, height: 6)
+                }
             }
-            Button {
-                _ = store.close(doc)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
-                    .frame(width: 14, height: 14)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .opacity(hovering == doc.id || isActive ? 0.7 : 0)
+            .frame(width: 16)
         }
-        .padding(.horizontal, 9)
-        .frame(height: 28)
-        .frame(minWidth: 110, maxWidth: 190)
+        .padding(.leading, 9)
+        .padding(.trailing, 4)
+        .frame(width: tabWidth, height: height)
         .background(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(isActive ? Color(nsColor: .controlBackgroundColor)
-                               : (hovering == doc.id ? Color.primary.opacity(0.06) : Color.clear))
+                               : Color.primary.opacity(isHover ? 0.10 : 0.045))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(Color.primary.opacity(isActive ? 0.10 : 0), lineWidth: 0.5)
         )
         .contentShape(Rectangle())
         .onTapGesture { store.select(doc) }
-        .onHover { hovering = $0 ? doc.id : (hovering == doc.id ? nil : hovering) }
+        .onHover { inside in hovering = inside ? doc.id : (hovering == doc.id ? nil : hovering) }
         .help(doc.fileURL?.path ?? doc.displayName)
         .contextMenu {
             Button("保存") { doc.saveDocument() }
             Button("別名で保存…") { doc.saveDocument(forceNewLocation: true) }
             Divider()
             Button("複製") { store.select(doc); store.duplicateActive() }
-            if doc.fileURL != nil {
-                Button("Finder で表示") {
-                    NSWorkspace.shared.activateFileViewerSelecting([doc.fileURL!])
-                }
+            if let url = doc.fileURL {
+                Button("Finder で表示") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
             }
             Divider()
             Button("閉じる") { _ = store.close(doc) }

@@ -28,6 +28,9 @@ struct ExportSheet: View {
     @State private var dpi: Double = 350
     @State private var printBoxes = true
     @State private var lossless = false
+    @State private var imageProfile: ColorProfile = .sRGB
+    @State private var pdfProfile: ColorProfile = .sRGB
+    @State private var gamma = 1.0
 
     enum SizingMode: String, CaseIterable, Identifiable {
         case longEdge, exact
@@ -41,7 +44,8 @@ struct ExportSheet: View {
 
     private var imageOptions: ImageExporter.Options {
         .init(format: format, sizing: sizing, quality: quality,
-              includeBleed: false, transparent: transparent)
+              includeBleed: false, transparent: transparent,
+              profile: imageProfile, gamma: gamma)
     }
 
     private var outputSize: CGSize {
@@ -67,7 +71,15 @@ struct ExportSheet: View {
             Divider()
             footer
         }
-        .frame(width: 600, height: 520)
+        .frame(width: 620, height: 560)
+        .onAppear {
+            let prefs = Preferences.shared
+            dpi = prefs.exportDPI
+            quality = prefs.exportQuality
+            lossless = prefs.exportLossless
+            longEdge = prefs.exportLongEdge
+            if let f = ImageExporter.Format(rawValue: prefs.exportFormat), f.isAvailable { format = f }
+        }
     }
 
     private var header: some View {
@@ -146,6 +158,29 @@ struct ExportSheet: View {
                 }
             }
 
+            VStack(alignment: .leading, spacing: 8) {
+                SectionHeader("色", icon: "paintpalette")
+                Picker("", selection: $imageProfile) {
+                    ForEach(ColorProfile.allCases.filter { $0.isSupported(by: format) }) {
+                        Text($0.label).tag($0)
+                    }
+                }
+                .labelsHidden()
+                Text(imageProfile.note).font(.system(size: 10)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                SliderRow(label: "ガンマ", value: $gamma, range: 0.6...1.6, step: 0.02, format: "%.2f")
+                if abs(gamma - 1.0) > 0.001 {
+                    HStack {
+                        Text(gamma > 1 ? "明るく出ます" : "暗く出ます")
+                            .font(.system(size: 10)).foregroundStyle(.orange)
+                        Spacer()
+                        Button("1.00 に戻す") { gamma = 1.0 }
+                            .buttonStyle(.link).font(.system(size: 10))
+                    }
+                }
+            }
+
             if format.isLossy {
                 SliderRow(label: "画質", value: $quality, range: 0.3...1.0, step: 0.01, format: "%.2f")
             }
@@ -208,6 +243,16 @@ struct ExportSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                Picker("色", selection: $pdfProfile) {
+                    ForEach([ColorProfile.sRGB, .adobeRGB, .gray, .cmyk]) { Text($0.label).tag($0) }
+                }
+                .font(.system(size: 11))
+                Text(pdfProfile == .cmyk
+                     ? "写真・文字・図形をすべて CMYK に変換します。無彩色は K 版だけに落とすので、文字が4色刷りになりません。"
+                     : pdfProfile.note)
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 Toggle("可逆圧縮で埋め込む（ファイルが非常に大きくなります）", isOn: $lossless)
                     .font(.system(size: 11))
                 Text(lossless
@@ -242,11 +287,14 @@ struct ExportSheet: View {
                     row("出力サイズ", "\(Int(outputSize.width)) × \(Int(outputSize.height)) px")
                     row("形式", format.label)
                     row("枚数", allBoards ? "\(state.boards.count) 枚" : "1 枚")
+                    row("色", imageProfile.label)
+                    if abs(gamma - 1.0) > 0.001 { row("ガンマ", String(format: "%.2f", gamma)) }
                 } else {
                     row("仕上がり", state.settings.displaySize)
                     row("ページ数", "\(PDFExporter.pageCount(boards: state.boards.count, settings: state.settings, mode: pdfMode))")
                     row("解像度", state.settings.kind == .zine ? "\(Int(dpi)) dpi" : "等倍")
                     row("埋め込み", lossless ? "可逆" : "JPEG")
+                    row("色", pdfProfile.label)
                 }
             }
             .padding(.horizontal, 14)
@@ -276,6 +324,7 @@ struct ExportSheet: View {
                 } else {
                     state.exportPDF(options: .init(mode: pdfMode, dpi: dpi,
                                                    compression: lossless ? .lossless : .jpeg(quality: 0.92),
+                                                   profile: pdfProfile,
                                                    printBoxes: printBoxes,
                                                    title: state.fileURL?.deletingPathExtension().lastPathComponent ?? "ZineMaker"))
                 }

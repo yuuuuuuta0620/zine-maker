@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var state: AppState
+    @ObservedObject var store: DocumentStore
     @State private var showingExport = false
     @State private var showingTemplates = false
 
@@ -49,6 +50,11 @@ struct ContentView: View {
 
     @ToolbarContentBuilder
     private var toolbarItems: some ToolbarContent {
+        // タブはブラウザと同じ位置（タイトルバー行）に置く
+        ToolbarItem(placement: .principal) {
+            DocumentTabBar(store: store)
+        }
+
         ToolbarItemGroup(placement: .navigation) {
             Picker("", selection: Binding(
                 get: { state.settings.kind },
@@ -115,6 +121,12 @@ struct ContentView: View {
                 .font(.system(size: 10)).foregroundStyle(.secondary)
                 .lineLimit(1).truncationMode(.middle)
             Spacer()
+            Button("自動で追う") {
+                let n = state.followMovedPhotos()
+                state.status = n > 0 ? "\(n) 枚を追跡しました" : "移動先を特定できませんでした"
+            }
+            .controlSize(.small)
+            .help("保存時のブックマークから、移動・改名された写真を探します")
             Button("フォルダから探す…") { state.presentRelink() }
                 .controlSize(.small)
         }
@@ -126,7 +138,13 @@ struct ContentView: View {
 
     private var statusBar: some View {
         HStack(spacing: 10) {
-            if state.dirty {
+            if let progress = state.exportProgress {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .frame(width: 110)
+                Text(String(format: "%.0f%%", progress * 100))
+                    .font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary)
+            } else if state.dirty {
                 Circle().fill(.orange).frame(width: 6, height: 6)
             }
             Text(state.status.isEmpty

@@ -28,6 +28,8 @@ enum PDFExporter {
         var mode: PageMode = .singlePage
         var dpi: Double = 350
         var compression: ImageCompression = .jpeg(quality: 0.92)
+        /// 出力の色空間。印刷所へ入れるなら .cmyk
+        var profile: ColorProfile = .sRGB
         /// トンボ・裁ち落としのボックス情報を入れる（印刷入稿向け）
         var printBoxes = true
         var title = "ZINE"
@@ -39,7 +41,8 @@ enum PDFExporter {
         var errorDescription: String? { "PDF を作成できませんでした" }
     }
 
-    static func export(context: DocumentContext, to url: URL, options: Options = .init()) throws {
+    static func export(context: DocumentContext, to url: URL, options: Options = .init(),
+                       progress: ((Double) -> Void)? = nil) throws {
         let boards = context.boards
         let settings = context.settings
         let scenes = context.allScenes()
@@ -55,9 +58,13 @@ enum PDFExporter {
 
         // ボードは 1pt = 1px なので、等倍（72dpi）で出さないと無駄に巨大になる
         let effectiveDPI = settings.kind == .board ? 72.0 : options.dpi
+        // CMYK 指定なら、写真も文字も図形もその空間に変換して書く
+        let space = options.profile == .sRGB ? nil : options.profile.colorSpace
         let renderOptions = CanvasRenderer.Options(
             guides: false,
-            quality: .output(dpi: effectiveDPI, jpegQuality: options.compression.jpegQuality))
+            quality: .output(dpi: effectiveDPI, jpegQuality: options.compression.jpegQuality),
+            colorSpace: space,
+            imageProfile: options.profile == .sRGB ? nil : options.profile)
 
         // 組写真ボードは1枚1ページ。塗り足しもトンボもない。
         guard settings.kind == .zine else {
@@ -65,6 +72,7 @@ enum PDFExporter {
                 ctx.beginPDFPage(pageInfo(media: settings.mediaBox, trim: nil, bleed: nil))
                 CanvasRenderer.draw(board, settings: settings, scene: scenes[i], in: ctx, options: renderOptions)
                 ctx.endPDFPage()
+                progress?(Double(i + 1) / Double(max(boards.count, 1)))
             }
             ctx.closePDF()
             ImageStore.shared.purgeFullResolution()
@@ -72,6 +80,7 @@ enum PDFExporter {
         }
 
         for (i, board) in boards.enumerated() {
+            defer { progress?(Double(i + 1) / Double(max(boards.count, 1))) }
             switch options.mode {
             case .spread:
                 // MediaBox = 塗り足し込み、TrimBox = 仕上がり。この2つが入稿の要。

@@ -191,6 +191,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
 
         let store = DocumentStore.shared
+        store.offerRecoveryIfNeeded()
         guard store.documents.isEmpty else { return }   // Finder から開かれていれば触らない
         switch Preferences.shared.launch {
         case .newDocument: store.newDocument()
@@ -202,7 +203,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 終了前に未保存を確認する
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        DocumentStore.shared.closeAll() ? .terminateNow : .terminateCancel
+        guard DocumentStore.shared.closeAll() else { return .terminateCancel }
+        Autosave.markCleanExit()
+        return .terminateNow
     }
 
     /// Finder からの .zine ダブルクリック／`open` コマンド

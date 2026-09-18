@@ -37,9 +37,14 @@ enum PlaceResolver {
         var result: [UUID: Place] = [:]
         let entries = Array(groups.values)
 
-        func step(_ i: Int) {
+        // 入れ子の関数を自分で呼ぶと、その文脈が自分を握って離さなくなる。
+        // 明示的に持ち回して、終わったら必ず捨てる。
+        var step: ((Int) -> Void)?
+        step = { i in
             guard i < entries.count else {
-                DispatchQueue.main.async { completion(result) }
+                let finished = result
+                step = nil
+                DispatchQueue.main.async { completion(finished) }
                 return
             }
             progress(i, entries.count)
@@ -49,10 +54,10 @@ enum PlaceResolver {
                     for id in entry.ids { result[id] = place }
                 }
                 // 叩きすぎると throttle されるので少し置く
-                DispatchQueue.global().asyncAfter(deadline: .now() + 0.7) { step(i + 1) }
+                DispatchQueue.global().asyncAfter(deadline: .now() + 0.7) { step?(i + 1) }
             }
         }
-        step(0)
+        step?(0)
     }
 
     private static func format(_ mark: CLPlacemark) -> Place? {

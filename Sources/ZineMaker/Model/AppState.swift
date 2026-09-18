@@ -19,6 +19,8 @@ final class AppState: ObservableObject, Identifiable {
     @Published var fileURL: URL?
     @Published var dirty = false
     @Published var status = ""
+    /// 書き出し中の進み具合（0〜1）。終わったら nil。
+    @Published var exportProgress: Double?
     @Published private(set) var fitToken = 0
 
     // 表示のオン／オフ（ドキュメントには保存しない）
@@ -84,6 +86,17 @@ final class AppState: ObservableObject, Identifiable {
         assets.filter { !FileManager.default.fileExists(atPath: $0.path) }
     }
 
+    /// ブックマークを頼りに、動いた写真を自動で追い直す
+    @discardableResult
+    func followMovedPhotos() -> Int {
+        var recovered = 0
+        for i in assets.indices where !FileManager.default.fileExists(atPath: assets[i].path) {
+            if assets[i].resolveFromBookmark() { recovered += 1 }
+        }
+        if recovered > 0 { dirty = true; ImageStore.shared.purgeAll() }
+        return recovered
+    }
+
     /// まだどの枠にも入っていない写真
     var unplacedAssets: [PhotoAsset] {
         let used = Set(boards.flatMap { $0.imageFrames.compactMap(\.assetID) })
@@ -115,6 +128,24 @@ final class AppState: ObservableObject, Identifiable {
 
     private var snapshot: ZineFile {
         ZineFile(settings: settings, meta: meta, series: series, assets: assets, boards: boards)
+    }
+
+    /// 自動保存の控え用
+    var snapshotFile: ZineFile { snapshot }
+
+    /// 控えから戻す
+    func restore(_ file: ZineFile, from original: URL?) {
+        undoStack.removeAll(); redoStack.removeAll()
+        settings = file.settings
+        meta = file.meta
+        series = file.series
+        assets = file.assets
+        boards = file.boards.isEmpty ? [Artboard()] : file.boards
+        currentIndex = 0
+        selection.removeAll()
+        fileURL = original
+        dirty = true        // 元のファイルにはまだ書いていない
+        requestFit()
     }
 
     /// 1操作の直前に一度だけ呼ぶ（ドラッグ中は呼ばない）
@@ -844,6 +875,7 @@ final class AppState: ObservableObject, Identifiable {
             guard !FileManager.default.fileExists(atPath: assets[i].path),
                   let found = byName[assets[i].name] else { continue }
             assets[i].path = found.path
+            assets[i].bookmark = PhotoAsset.makeBookmark(found)
             fixed += 1
         }
         dirty = true
@@ -1037,7 +1069,17 @@ final class AppState: ObservableObject, Identifiable {
         traySelection.removeAll()
         fileURL = url
         dirty = false
-        status = "読み込みました: \(url.lastPathComponent)"
+
+        // 写真が動いていたらブックマークで追い直す
+        var recovered = 0
+        for i in assets.indices where !FileManager.default.fileExists(atPath: assets[i].path) {
+            if assets[i].resolveFromBookmark() { recovered += 1 }
+        }
+        _ = assets.map { $0.startAccessing() }
+
+        status = recovered > 0
+            ? "読み込みました: \(url.lastPathComponent)（移動した写真 \(recovered) 枚を追跡しました）"
+            : "読み込みました: \(url.lastPathComponent)"
         requestFit()
     }
 

@@ -80,7 +80,11 @@ enum ImageExporter {
         var includeBleed = false
         /// PNG / TIFF / AVIF のみ。背景を塗らずに透過で出す
         var transparent = false
-        /// sRGB プロファイルを埋め込む
+        /// 書き出す色空間
+        var profile: ColorProfile = .sRGB
+        /// 1.0 でそのまま。刷ると沈む場合などに最後の微調整として使う
+        var gamma: Double = 1.0
+        /// ICC プロファイルを埋め込む
         var embedProfile = true
     }
 
@@ -124,6 +128,9 @@ enum ImageExporter {
         let source = options.includeBleed ? settings.mediaBox : settings.trimBox
         let pixelSize = outputSize(for: source, sizing: options.sizing)
 
+        // CMYK / グレーはその空間では組めないので、いったん RGB で描いてから変換する
+        let renderProfile: ColorProfile = options.profile.componentCount == 3 ? options.profile : .sRGB
+        let renderSpace = renderProfile.colorSpace ?? CGColorSpaceCreateDeviceRGB()
         let alphaInfo: CGImageAlphaInfo =
             options.transparent && options.format.supportsTransparency
                 ? .premultipliedLast : .noneSkipLast
@@ -131,7 +138,7 @@ enum ImageExporter {
         guard pixelSize.width >= 1, pixelSize.height >= 1,
               let ctx = CGContext(data: nil, width: Int(pixelSize.width), height: Int(pixelSize.height),
                                   bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  space: renderSpace,
                                   bitmapInfo: alphaInfo.rawValue)
         else { throw ExportError.cannotCreateContext }
 
@@ -155,7 +162,14 @@ enum ImageExporter {
                             options: .init(guides: false, quality: renderQuality,
                                            drawBackground: opaque))
 
-        guard let image = ctx.makeImage() else { throw ExportError.cannotCreateContext }
+        guard var image = ctx.makeImage() else { throw ExportError.cannotCreateContext }
+
+        // ガンマ → 最終的な色空間、の順で通す
+        if let adjusted = ColorConvert.applyGamma(image, options.gamma) { image = adjusted }
+        if options.profile.componentCount != 3, let space = options.profile.colorSpace,
+           let converted = ColorConvert.convert(image, to: space, profile: options.profile) {
+            image = converted
+        }
         return image
     }
 
@@ -187,10 +201,11 @@ enum ImageExporter {
 
         var props: [CFString: Any] = [:]
         if options.format.isLossy { props[kCGImageDestinationLossyCompressionQuality] = options.quality }
-        if options.embedProfile, let icc = CGColorSpace(name: CGColorSpace.sRGB)?.copyICCData() {
-            props[kCGImagePropertyProfileName] = "sRGB IEC61966-2.1"
-            props[kCGImageDestinationEmbedThumbnail] = false
-            _ = icc
+        props[kCGImageDestinationEmbedThumbnail] = false
+        if options.embedProfile {
+            // CGImage が色空間を持っているので ImageIO が ICC を埋める。
+            // 名前だけ添えて、受け取り側が判別しやすいようにする。
+            props[kCGImagePropertyProfileName] = options.profile.label
         }
         CGImageDestinationAddImage(dest, image, props as CFDictionary)
         guard CGImageDestinationFinalize(dest) else { throw ExportError.cannotWrite(url.lastPathComponent) }

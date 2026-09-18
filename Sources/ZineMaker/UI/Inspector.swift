@@ -22,7 +22,9 @@ struct Inspector: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .padding(10)
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 9)
 
             Divider()
 

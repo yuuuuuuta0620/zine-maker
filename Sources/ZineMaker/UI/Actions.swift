@@ -65,8 +65,8 @@ extension AppState {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         rememberFolder(url)
 
-        runExport { [self] in
-            try PDFExporter.export(context: documentContext, to: url, options: options)
+        runExport { [self] report in
+            try PDFExporter.export(context: documentContext, to: url, options: options, progress: report)
             let pages = PDFExporter.pageCount(boards: boards.count, settings: settings, mode: options.mode)
             return "\(pages) ページのPDFを書き出しました: \(url.lastPathComponent)"
         }
@@ -84,7 +84,7 @@ extension AppState {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         rememberFolder(url)
 
-        runExport { [self] in
+        runExport { [self] report in
             if allBoards {
                 let stem = url.deletingPathExtension()
                 let scenes = documentContext.allScenes()
@@ -92,6 +92,7 @@ extension AppState {
                     let each = URL(fileURLWithPath: String(format: "%@-%02d.%@", stem.path, i + 1, options.format.ext))
                     try ImageExporter.export(board: board, settings: settings, scene: scenes[i],
                                              to: each, options: options)
+                    report(Double(i + 1) / Double(max(boards.count, 1)))
                 }
                 return "\(boards.count) 枚を書き出しました: \(url.deletingLastPathComponent().lastPathComponent)/"
             } else {
@@ -120,15 +121,23 @@ extension AppState {
             ?? (settings.kind == .zine ? "zine" : "layout")
     }
 
-    /// 書き出しは重いので UI を止めないように回す
-    private func runExport(_ work: @escaping () throws -> String) {
+    /// 書き出しは重いので UI を止めないように回す。進み具合はメインへ返す。
+    private func runExport(_ work: @escaping (@escaping (Double) -> Void) throws -> String) {
         status = "書き出し中…"
+        exportProgress = 0
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var last = Date.distantPast
+            let report: (Double) -> Void = { value in
+                // 毎ページ更新すると描画が忙しいので、間引く
+                guard Date().timeIntervalSince(last) > 0.08 || value >= 1 else { return }
+                last = Date()
+                DispatchQueue.main.async { self?.exportProgress = value }
+            }
             do {
-                let message = try work()
-                DispatchQueue.main.async { self?.status = message }
+                let message = try work(report)
+                DispatchQueue.main.async { self?.exportProgress = nil; self?.status = message }
             } catch {
-                DispatchQueue.main.async { self?.status = ""; self?.present(error) }
+                DispatchQueue.main.async { self?.exportProgress = nil; self?.status = ""; self?.present(error) }
             }
         }
     }

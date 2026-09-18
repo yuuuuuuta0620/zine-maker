@@ -477,8 +477,12 @@ enum CanvasRenderer {
         let w = max(Int((source.width * scale).rounded()), 1)
         let h = max(Int((source.height * scale).rounded()), 1)
 
+        // 画面用のサムネイルは広色域で作る。書き出しは ImageExporter 側で sRGB を使う。
+        let space = Preferences.shared.wideGamutCanvas
+            ? (CGColorSpace(name: CGColorSpace.displayP3) ?? CGColorSpaceCreateDeviceRGB())
+            : (CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB())
         guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  space: space,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         ctx.scaleBy(x: scale, y: scale)
         ctx.translateBy(x: -source.minX, y: -source.minY)

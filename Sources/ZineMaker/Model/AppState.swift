@@ -3,9 +3,9 @@ import Combine
 import CoreGraphics
 import Foundation
 
-final class AppState: ObservableObject {
-    /// Finder からの .zine オープンを AppDelegate 経由で受けるため共有インスタンスを持つ
-    static let shared = AppState()
+final class AppState: ObservableObject, Identifiable {
+    /// タブ1枚ぶん＝ドキュメント1つ
+    let id = UUID()
 
     @Published var settings = DocSettings() { didSet { if settings != oldValue { dirty = true } } }
     @Published var meta = DocumentMeta() { didSet { if meta != oldValue { dirty = true } } }
@@ -79,6 +79,11 @@ final class AppState: ObservableObject {
         return rects.dropFirst().reduce(first) { $0.union($1) }
     }
 
+    /// ファイルが見つからなくなった写真（別のMacで開いた、フォルダを動かした、など）
+    var missingAssets: [PhotoAsset] {
+        assets.filter { !FileManager.default.fileExists(atPath: $0.path) }
+    }
+
     /// まだどの枠にも入っていない写真
     var unplacedAssets: [PhotoAsset] {
         let used = Set(boards.flatMap { $0.imageFrames.compactMap(\.assetID) })
@@ -86,6 +91,25 @@ final class AppState: ObservableObject {
     }
 
     func requestFit() { fitToken += 1 }
+
+    /// タブに出す名前
+    var displayName: String {
+        if let url = fileURL { return url.deletingPathExtension().lastPathComponent }
+        if !meta.title.isEmpty { return meta.title }
+        return settings.kind == .zine ? "名称未設定のZINE" : "名称未設定の組写真"
+    }
+
+    /// 設定を反映した新規ドキュメント
+    convenience init(kind: DocKind) {
+        self.init()
+        let prefs = Preferences.shared
+        settings = prefs.makeSettings(kind: kind)
+        showRulers = prefs.showRulers
+        showColumns = prefs.showColumns
+        showCustomGuides = prefs.showGuides
+        snapEnabled = prefs.snapEnabled
+        dirty = false
+    }
 
     // MARK: - Undo
 
@@ -515,6 +539,7 @@ final class AppState: ObservableObject {
         assets.append(contentsOf: added)
         dirty = true
         status = added.isEmpty ? "すでに読み込み済みです" : "\(added.count) 枚をトレイに追加しました"
+        if Preferences.shared.autoResolvePlaces, !added.isEmpty { resolvePlaces() }
         // メタデータを裏で温めておく（枚数表示や比率計算が待たされないように）
         let urlsToWarm = added.map(\.url)
         DispatchQueue.global(qos: .utility).async {
@@ -797,6 +822,35 @@ final class AppState: ObservableObject {
             i += 1
         }
         status = "\(i - currentIndex) ページをまとめました"
+    }
+
+    // MARK: 見つからない写真の付け直し
+
+    /// フォルダを指定して、同じファイル名の写真を探して繋ぎ直す
+    func relinkMissing(in folder: URL) {
+        let missing = missingAssets
+        guard !missing.isEmpty else { status = "見つからない写真はありません"; return }
+
+        var byName: [String: URL] = [:]
+        if let e = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey]) {
+            for case let url as URL in e where byName[url.lastPathComponent] == nil {
+                byName[url.lastPathComponent] = url
+            }
+        }
+
+        beginUndoGroup()
+        var fixed = 0
+        for i in assets.indices {
+            guard !FileManager.default.fileExists(atPath: assets[i].path),
+                  let found = byName[assets[i].name] else { continue }
+            assets[i].path = found.path
+            fixed += 1
+        }
+        dirty = true
+        ImageStore.shared.purgeAll()
+        status = fixed == 0
+            ? "同じ名前の写真が見つかりませんでした"
+            : "\(fixed) 枚を繋ぎ直しました" + (missing.count > fixed ? "（残り \(missing.count - fixed) 枚）" : "")
     }
 
     // MARK: 撮影地

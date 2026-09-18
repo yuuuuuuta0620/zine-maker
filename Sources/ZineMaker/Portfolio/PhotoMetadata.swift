@@ -104,16 +104,8 @@ struct PhotoMetadata: Equatable {
 // MARK: - 読み取り
 
 extension ImageStore {
-    private static var metadataCache: [String: PhotoMetadata] = [:]
-    private static let metadataLock = NSLock()
-
     func metadata(of url: URL) -> PhotoMetadata {
-        ImageStore.metadataLock.lock()
-        if let cached = ImageStore.metadataCache[url.path] {
-            ImageStore.metadataLock.unlock()
-            return cached
-        }
-        ImageStore.metadataLock.unlock()
+        if let cached = cachedMetadata(url.path) { return cached }
 
         var m = PhotoMetadata()
         if let src = CGImageSourceCreateWithURL(url as CFURL, nil),
@@ -178,9 +170,7 @@ extension ImageStore {
             m.location = parts.joined(separator: " ").nilIfEmpty
         }
 
-        ImageStore.metadataLock.lock()
-        ImageStore.metadataCache[url.path] = m
-        ImageStore.metadataLock.unlock()
+        storeMetadata(m, for: url.path)
         return m
     }
 }

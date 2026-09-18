@@ -6,6 +6,8 @@ struct ContentView: View {
     @State private var showingExport = false
     @State private var showingTemplates = false
 
+    @ObservedObject private var prefs = Preferences.shared
+
     var body: some View {
         NavigationSplitView {
             Sidebar(state: state)
@@ -13,6 +15,7 @@ struct ContentView: View {
         } detail: {
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
+                    if !state.missingAssets.isEmpty { missingBanner }
                     CanvasContainer(state: state)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     Divider()
@@ -28,6 +31,20 @@ struct ContentView: View {
         .safeAreaInset(edge: .bottom) { statusBar }
         .onReceive(NotificationCenter.default.publisher(for: .zineShowExport)) { _ in showingExport = true }
         .onReceive(NotificationCenter.default.publisher(for: .zineShowTemplates)) { _ in showingTemplates = true }
+        .onChange(of: state.currentIndex) { _, _ in prefetchNeighbours() }
+        .onAppear { prefetchNeighbours() }
+    }
+
+    /// 次と前のページの写真を先に読んでおく。ページ送りが引っかからないように。
+    private func prefetchNeighbours() {
+        guard prefs.prefetchNeighbors else { return }
+        let assets = state.assetIndex
+        let urls = [state.currentIndex + 1, state.currentIndex - 1]
+            .filter { state.boards.indices.contains($0) }
+            .flatMap { state.boards[$0].imageFrames.compactMap(\.assetID) }
+            .compactMap { assets[$0]?.url }
+        guard !urls.isEmpty else { return }
+        ImageStore.shared.prefetch(urls, maxPixel: 2048)
     }
 
     @ToolbarContentBuilder
@@ -84,6 +101,27 @@ struct ContentView: View {
             }
             .help("PDF・JPEG・PNG・AVIF などで書き出す（⌘E）")
         }
+    }
+
+    /// 写真が見つからないときの案内
+    private var missingBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11)).foregroundStyle(.orange)
+            Text("\(state.missingAssets.count) 枚の写真が見つかりません")
+                .font(.system(size: 11, weight: .medium))
+            Text(state.missingAssets.prefix(3).map(\.name).joined(separator: "、")
+                 + (state.missingAssets.count > 3 ? " ほか" : ""))
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.middle)
+            Spacer()
+            Button("フォルダから探す…") { state.presentRelink() }
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.orange.opacity(0.12))
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     private var statusBar: some View {

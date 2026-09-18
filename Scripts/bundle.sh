@@ -24,5 +24,14 @@ sed -e 's|$(EXECUTABLE_NAME)|ZineMaker|g' \
     Resources/Info.plist > "$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist" > /dev/null
 
+# アセットカタログをコンパイルしてアイコンを入れる
+if command -v actool > /dev/null 2>&1; then
+  actool Resources/Assets.xcassets \
+    --compile "$APP/Contents/Resources" \
+    --app-icon AppIcon --output-partial-info-plist /tmp/zm-icon.plist \
+    --platform macosx --minimum-deployment-target 14.0 > /dev/null 2>&1 || true
+  /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$APP/Contents/Info.plist" 2>/dev/null || true
+fi
+
 codesign --force --deep --sign - "$APP" 2>/dev/null || true
 echo "built: $APP"

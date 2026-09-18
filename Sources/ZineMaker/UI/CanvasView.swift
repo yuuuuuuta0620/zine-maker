@@ -139,7 +139,9 @@ final class CanvasView: NSView {
         guard let state, let ctx = NSGraphicsContext.current?.cgContext else { return }
         let settings = state.settings
 
-        ctx.setFillColor(NSColor.underPageBackgroundColor.cgColor)
+        // キャンバスの地の明るさは設定から
+        let level = CGFloat(Preferences.shared.canvasBrightness)
+        ctx.setFillColor(CGColor(gray: level * 0.35, alpha: 1))
         ctx.fill(bounds)
 
         ctx.saveGState()
@@ -173,7 +175,8 @@ final class CanvasView: NSView {
     private var screenMaxPixel: Int {
         let backing = window?.backingScaleFactor ?? 2
         let onScreenLongEdge = max(bounds.width, bounds.height) * backing
-        return min(8192, max(512, Int(onScreenLongEdge * min(max(zoom, 0.2), 4) / max(zoom, 0.02) * zoom)))
+        let quality = CGFloat(Preferences.shared.screenQuality)
+        return min(8192, max(512, Int(onScreenLongEdge * quality * min(max(zoom, 0.2), 4) / max(zoom, 0.02) * zoom)))
     }
 
     // MARK: 定規

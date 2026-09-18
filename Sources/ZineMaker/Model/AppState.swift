@@ -485,13 +485,28 @@ final class AppState: ObservableObject, Identifiable {
     func addImageFrame(assetID: UUID? = nil, at point: CGPoint? = nil) {
         beginUndoGroup()
         let box = settings.contentBox
-        let size = CGSize(width: box.width * 0.5, height: box.height * 0.5)
+        let size = newImageFrameSize(for: assetID)
         let origin = point.map { CGPoint(x: $0.x - size.width / 2, y: $0.y - size.height / 2) }
             ?? CGPoint(x: box.midX - size.width / 2, y: box.midY - size.height / 2)
         var frame = ImageFrame(rect: CGRect(origin: origin, size: size))
         frame.assetID = assetID
         currentBoard.elements.append(.image(frame))
         selection = [frame.id]
+    }
+
+    /// 新しく置く写真枠の大きさ。
+    /// 紙の半分に収まる範囲で**写真の形に合わせる**ので、置いた瞬間に切り取られない。
+    /// 写真が分からないとき（空の枠）は紙の半分の矩形にする。
+    func newImageFrameSize(for assetID: UUID?) -> CGSize {
+        let box = settings.contentBox
+        let area = CGSize(width: box.width * 0.5, height: box.height * 0.5)
+        guard let assetID,
+              let asset = assets.first(where: { $0.id == assetID }),
+              let pixels = ImageStore.shared.pixelSize(of: asset.url),
+              pixels.width > 0, pixels.height > 0
+        else { return area }
+        let scale = min(area.width / pixels.width, area.height / pixels.height)
+        return CGSize(width: pixels.width * scale, height: pixels.height * scale)
     }
 
     func addShape(_ kind: ShapeKind, at point: CGPoint? = nil) {

@@ -377,6 +377,9 @@ struct ImageFrame: Codable, Identifiable, Equatable {
     var name: String?
     var assetID: UUID?
     var fitMode: FitMode = .fill
+    /// 大きさを変えても写真の元の比率を保つ。写真を置いたときに入る。
+    /// 型に流し込んだ枠は形が決まっているので付けない。
+    var keepsPhotoAspect = false
     /// fit 結果に対する追加倍率（1.0 = ぴったり）
     var contentScale: CGFloat = 1.0
     /// 枠内での写真のずらし量（pt）
@@ -398,6 +401,7 @@ struct ImageFrame: Codable, Identifiable, Equatable {
         name          = c.value(.name, String?.none)
         assetID       = c.value(.assetID, UUID?.none)
         fitMode       = c.value(.fitMode, .fill)
+        keepsPhotoAspect = c.value(.keepsPhotoAspect, false)
         contentScale  = c.value(.contentScale, 1)
         contentOffset = c.value(.contentOffset, .zero)
         cornerRadius  = c.value(.cornerRadius, 0)

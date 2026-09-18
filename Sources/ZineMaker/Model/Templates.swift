@@ -7,6 +7,8 @@ struct LayoutTemplate: Identifiable, Hashable {
     let id: String
     let name: String
     let slots: [CGRect]
+    /// 紙の端まで使い、写真同士の隙間も取らない。SNS の組写真でよく使う帯組み。
+    var bleed = false
 
     var count: Int { slots.count }
 
@@ -44,7 +46,50 @@ struct LayoutTemplate: Identifiable, Hashable {
 
     // MARK: - 一覧
 
-    static let all: [LayoutTemplate] = [
+    /// 端まで使う帯組み。上から下へ並べる。
+    private static func bands(_ heights: [Double], id: String, name: String) -> LayoutTemplate {
+        var slots: [CGRect] = []
+        var top = 1.0
+        for h in heights {
+            slots.append(rect(0, top - h, 1, h))
+            top -= h
+        }
+        return LayoutTemplate(id: id, name: name, slots: slots, bleed: true)
+    }
+
+    /// 端まで使う縦割り。左から右へ並べる。
+    private static func columns(_ widths: [Double], id: String, name: String) -> LayoutTemplate {
+        var slots: [CGRect] = []
+        var left = 0.0
+        for w in widths {
+            slots.append(rect(left, 0, w, 1))
+            left += w
+        }
+        return LayoutTemplate(id: id, name: name, slots: slots, bleed: true)
+    }
+
+    /// 端まで使う型。組写真はこちらが主役。
+    static let bleedTemplates: [LayoutTemplate] = [
+        LayoutTemplate(id: "bleed-1", name: "全面1枚", slots: [rect(0, 0, 1, 1)], bleed: true),
+        bands([0.5, 0.5], id: "bleed-v2", name: "全面 上下2段"),
+        bands([0.62, 0.38], id: "bleed-v2-top", name: "全面 上大・下小"),
+        bands([0.38, 0.62], id: "bleed-v2-bottom", name: "全面 上小・下大"),
+        bands([1.0/3, 1.0/3, 1.0/3], id: "bleed-v3", name: "全面 3段"),
+        bands([0.3, 0.4, 0.3], id: "bleed-v3-mid", name: "全面 3段・中央大"),
+        bands([0.25, 0.25, 0.25, 0.25], id: "bleed-v4", name: "全面 4段"),
+        columns([0.5, 0.5], id: "bleed-h2", name: "全面 左右2分割"),
+        columns([1.0/3, 1.0/3, 1.0/3], id: "bleed-h3", name: "全面 横3列"),
+        LayoutTemplate(id: "bleed-1-2", name: "全面 上1・下2", slots: [
+            rect(0, 0.5, 1, 0.5), rect(0, 0, 0.5, 0.5), rect(0.5, 0, 0.5, 0.5),
+        ], bleed: true),
+        LayoutTemplate(id: "bleed-2-1", name: "全面 上2・下1", slots: [
+            rect(0, 0.5, 0.5, 0.5), rect(0.5, 0.5, 0.5, 0.5), rect(0, 0, 1, 0.5),
+        ], bleed: true),
+        LayoutTemplate(id: "bleed-g2x2", name: "全面 2×2", slots: grid(cols: 2, rows: 2, id: "", name: "").slots,
+                       bleed: true),
+    ]
+
+    static let all: [LayoutTemplate] = bleedTemplates + [
         LayoutTemplate(id: "single", name: "1枚", slots: [rect(0, 0, 1, 1)]),
 
         LayoutTemplate(id: "v2", name: "上下2分割", slots: [
@@ -84,11 +129,14 @@ struct LayoutTemplate: Identifiable, Hashable {
         grid(cols: 3, rows: 3, id: "g3x3", name: "3×3"),
     ]
 
-    /// 枚数に合うものを優先して並べ替える
-    static func suggestions(for photoCount: Int) -> [LayoutTemplate] {
+    /// 枚数に合うものを優先して並べ替える。
+    /// `bleedFirst` のときは、同じくらい合う型なら端まで使うほうを先に出す。
+    static func suggestions(for photoCount: Int, bleedFirst: Bool = false) -> [LayoutTemplate] {
         all.sorted { a, b in
             let da = abs(a.count - photoCount), db = abs(b.count - photoCount)
-            return da == db ? a.count < b.count : da < db
+            if da != db { return da < db }
+            if bleedFirst, a.bleed != b.bleed { return a.bleed }
+            return a.count < b.count
         }
     }
 }

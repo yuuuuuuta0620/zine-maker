@@ -490,8 +490,39 @@ final class AppState: ObservableObject, Identifiable {
             ?? CGPoint(x: box.midX - size.width / 2, y: box.midY - size.height / 2)
         var frame = ImageFrame(rect: CGRect(origin: origin, size: size))
         frame.assetID = assetID
+        // 写真の形で生まれた枠は、そのまま形を保つ
+        frame.keepsPhotoAspect = assetID != nil
         currentBoard.elements.append(.image(frame))
         selection = [frame.id]
+    }
+
+    /// 型を展開する領域。端まで使う型は紙いっぱい（塗り足しも含む）。
+    private func layoutBox(for template: LayoutTemplate) -> CGRect {
+        if template.bleed { return settings.mediaBox }
+        return settings.kind == .zine
+            ? settings.marginBox(0).union(settings.marginBox(settings.pagesPerSpread - 1))
+            : settings.contentBox
+    }
+
+    /// 選択中の写真枠を、写真の形に合わせ直す。面積はおおよそ保つ。
+    func fitSelectedToPhotoAspect() {
+        var board = currentBoard
+        var changed = false
+        for i in board.elements.indices where selection.contains(board.elements[i].id) {
+            guard case .image(var f) = board.elements[i], let assetID = f.assetID,
+                  let asset = assets.first(where: { $0.id == assetID }),
+                  let px = ImageStore.shared.pixelSize(of: asset.url),
+                  px.width > 0, px.height > 0, f.rect.width > 0, f.rect.height > 0
+            else { continue }
+            let ratio = px.width / px.height
+            let area = f.rect.width * f.rect.height
+            let w = (area * ratio).squareRoot(), h = w / ratio
+            guard abs(w - f.rect.width) > 0.01 || abs(h - f.rect.height) > 0.01 else { continue }
+            f.rect = CGRect(x: f.rect.midX - w / 2, y: f.rect.midY - h / 2, width: w, height: h)
+            board.elements[i] = .image(f)
+            changed = true
+        }
+        if changed { currentBoard = board; objectWillChange.send() }
     }
 
     /// 新しく置く写真枠の大きさ。
@@ -631,9 +662,8 @@ final class AppState: ObservableObject, Identifiable {
     func applyTemplate(_ template: LayoutTemplate, photos: [UUID]? = nil, replaceExisting: Bool = true) {
         beginUndoGroup()
 
-        let box = settings.kind == .zine ? settings.marginBox(0).union(settings.marginBox(settings.pagesPerSpread - 1))
-                                         : settings.contentBox
-        let gutter = settings.kind == .zine ? Pt.fromMM(4) : settings.boardGutter
+        let box = layoutBox(for: template)
+        let gutter = template.bleed ? 0 : (settings.kind == .zine ? Pt.fromMM(4) : settings.boardGutter)
         let rects = template.frames(in: box, gutter: gutter)
 
         // 使う写真を決める
@@ -686,9 +716,8 @@ final class AppState: ObservableObject, Identifiable {
     }
 
     private func applyTemplateWithoutUndo(_ template: LayoutTemplate, photos: [UUID]) {
-        let box = settings.kind == .zine ? settings.marginBox(0).union(settings.marginBox(settings.pagesPerSpread - 1))
-                                         : settings.contentBox
-        let gutter = settings.kind == .zine ? Pt.fromMM(4) : settings.boardGutter
+        let box = layoutBox(for: template)
+        let gutter = template.bleed ? 0 : (settings.kind == .zine ? Pt.fromMM(4) : settings.boardGutter)
         var queue = photos
         var board = currentBoard
         board.elements.removeAll { $0.imageFrame != nil }

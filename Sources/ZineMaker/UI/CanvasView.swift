@@ -659,7 +659,8 @@ final class CanvasView: NSView {
             let rect = resizedRect(handle: handle, origin: origin, rotation: rotation,
                                    start: start, current: point,
                                    constrain: constrain, fromCenter: fromCenter,
-                                   snap: !noSnap && rotation == 0, excluding: [id])
+                                   snap: !noSnap && rotation == 0, excluding: [id],
+                                   lockedRatio: photoRatio(of: id))
             state.update(id: id) { $0.rect = rect }
 
         case .rotate(let id, let center, let startAngle, let original):
@@ -692,7 +693,8 @@ final class CanvasView: NSView {
     private func resizedRect(handle: Handle, origin: CGRect, rotation: CGFloat,
                              start: CGPoint, current: CGPoint,
                              constrain: Bool, fromCenter: Bool,
-                             snap: Bool, excluding: Set<UUID>) -> CGRect {
+                             snap: Bool, excluding: Set<UUID>,
+                             lockedRatio: CGFloat? = nil) -> CGRect {
         let a = -rotation * .pi / 180
         let rawDX = current.x - start.x, rawDY = current.y - start.y
         var dx = rawDX * cos(a) - rawDY * sin(a)
@@ -714,15 +716,32 @@ final class CanvasView: NSView {
         rect.size.width = max(rect.width, 8)
         rect.size.height = max(rect.height, 8)
 
-        // ⇧ で元の縦横比を保つ
-        if constrain, origin.width > 0, origin.height > 0 {
-            let ratio = origin.width / origin.height
-            if rect.width / rect.height > ratio { rect.size.width = rect.height * ratio }
-            else { rect.size.height = rect.width / ratio }
+        // 保つべき縦横比。写真の比率を保つ枠ならそれ、⇧ ならいまの枠の比率。
+        var ratio: CGFloat?
+        if let lockedRatio { ratio = lockedRatio }
+        else if constrain, origin.width > 0, origin.height > 0 { ratio = origin.width / origin.height }
+        if let ratio, ratio > 0 {
+            // 掴んだ辺に素直に従う。角なら大きいほうの動きに合わせる。
+            switch handle {
+            case .n, .s: rect.size.width = rect.height * ratio
+            case .e, .w: rect.size.height = rect.width / ratio
+            default:
+                if rect.width / rect.height > ratio { rect.size.width = rect.height * ratio }
+                else { rect.size.height = rect.width / ratio }
+            }
         }
 
         if fromCenter {
             rect.origin = CGPoint(x: origin.midX - rect.width / 2, y: origin.midY - rect.height / 2)
+        } else if ratio != nil, [Handle.n, .s, .e, .w].contains(handle) {
+            // 辺の取っ手では直交方向に支点がない。下端起点だと不自然なので中心から伸ばす。
+            switch handle {
+            case .e: rect.origin = CGPoint(x: origin.minX, y: origin.midY - rect.height / 2)
+            case .w: rect.origin = CGPoint(x: origin.maxX - rect.width, y: origin.midY - rect.height / 2)
+            case .n: rect.origin = CGPoint(x: origin.midX - rect.width / 2, y: origin.minY)
+            case .s: rect.origin = CGPoint(x: origin.midX - rect.width / 2, y: origin.maxY - rect.height)
+            default: break
+            }
         } else {
             // 掴んでいない角を固定する
             let anchorLocal = oppositeCorner(handle, of: origin)
@@ -739,8 +758,8 @@ final class CanvasView: NSView {
         }
 
         if snap {
-            let (sdx, sdy) = snapDelta(for: rect, excluding: excluding)
-            rect = rect.offsetBy(dx: sdx, dy: sdy)
+            rect = snappedWhileResizing(rect, handle: handle, ratio: ratio,
+                                        fromCenter: fromCenter, excluding: excluding)
         } else {
             snapLinesX = []; snapLinesY = []
         }
@@ -797,9 +816,90 @@ final class CanvasView: NSView {
 
     // MARK: - 吸着
 
-    private func snapDelta(for rect: CGRect, excluding: Set<UUID>) -> (CGFloat, CGFloat) {
-        guard let state else { return (0, 0) }
+    /// この枠が写真の比率を保つ設定なら、その比率（幅÷高さ）
+    private func photoRatio(of id: UUID) -> CGFloat? {
+        guard let state,
+              let frame = state.currentBoard.elements.first(where: { $0.id == id })?.imageFrame,
+              frame.keepsPhotoAspect,
+              let assetID = frame.assetID,
+              let asset = state.assets.first(where: { $0.id == assetID }),
+              let px = ImageStore.shared.pixelSize(of: asset.url),
+              px.height > 0
+        else { return nil }
+        return px.width / px.height
+    }
+
+    /// 大きさを変えている間の吸着。
+    /// 動かしている辺だけをガイドへ寄せる。矩形ごと平行移動すると、
+    /// 掴んでいない角まで動いてしまう。
+    private func snappedWhileResizing(_ rect: CGRect, handle: Handle, ratio: CGFloat?,
+                                      fromCenter: Bool, excluding: Set<UUID>) -> CGRect {
+        let (xs, ys) = snapTargets(excluding: excluding)
         let threshold = 7 / zoom
+
+        // この掴み方で動く辺
+        let movesLeft   = [Handle.nw, .w, .sw].contains(handle)
+        let movesRight  = [Handle.ne, .e, .se].contains(handle)
+        let movesTop    = [Handle.nw, .n, .ne].contains(handle)
+        let movesBottom = [Handle.sw, .s, .se].contains(handle)
+
+        var r = rect
+        var hitX: CGFloat?, hitY: CGFloat?
+
+        if movesLeft || movesRight {
+            let edge = movesLeft ? r.minX : r.maxX
+            if let guideValue = nearest(edge, in: xs, threshold) {
+                hitX = guideValue
+                if movesLeft { r.size.width += r.minX - guideValue; r.origin.x = guideValue }
+                else { r.size.width = guideValue - r.minX }
+            }
+        }
+        if movesTop || movesBottom {
+            let edge = movesBottom ? r.minY : r.maxY
+            if let guideValue = nearest(edge, in: ys, threshold) {
+                hitY = guideValue
+                if movesBottom { r.size.height += r.minY - guideValue; r.origin.y = guideValue }
+                else { r.size.height = guideValue - r.minY }
+            }
+        }
+
+        // 比率を保つ枠では、寄せた辺に合わせてもう一方を計算し直す。
+        // 両方寄ってしまうと比率が崩れるので、先に決まった横を優先する。
+        if let ratio, ratio > 0, r.width > 0, r.height > 0 {
+            let centerY = r.midY, centerX = r.midX
+            if hitX != nil {
+                let h = r.width / ratio
+                if movesBottom { r.origin.y = r.maxY - h }
+                else if !movesTop { r.origin.y = centerY - h / 2 }   // 横の取っ手は中心から
+                r.size.height = h
+                hitY = nil
+            } else if hitY != nil {
+                let w = r.height * ratio
+                if movesLeft { r.origin.x = r.maxX - w }
+                else if !movesRight { r.origin.x = centerX - w / 2 } // 縦の取っ手は中心から
+                r.size.width = w
+            }
+        }
+
+        guard r.width >= 8, r.height >= 8 else { snapLinesX = []; snapLinesY = []; return rect }
+        snapLinesX = hitX.map { [$0] } ?? []
+        snapLinesY = hitY.map { [$0] } ?? []
+        return r
+    }
+
+    private func nearest(_ value: CGFloat, in guides: [CGFloat], _ threshold: CGFloat) -> CGFloat? {
+        var best: CGFloat?
+        var bestDistance = threshold
+        for guideValue in guides where abs(guideValue - value) <= bestDistance {
+            bestDistance = abs(guideValue - value)
+            best = guideValue
+        }
+        return best
+    }
+
+    /// 吸着先の線。仕上がり・余白・ノド・ガイド・段組み・ほかの要素。
+    private func snapTargets(excluding: Set<UUID>) -> ([CGFloat], [CGFloat]) {
+        guard let state else { return ([], []) }
         let settings = state.settings
         let trim = settings.trimBox
 
@@ -827,6 +927,12 @@ final class CanvasView: NSView {
             xs += [r.minX, r.midX, r.maxX]
             ys += [r.minY, r.midY, r.maxY]
         }
+        return (xs, ys)
+    }
+
+    private func snapDelta(for rect: CGRect, excluding: Set<UUID>) -> (CGFloat, CGFloat) {
+        let threshold = 7 / zoom
+        let (xs, ys) = snapTargets(excluding: excluding)
 
         let (dx, hitX) = bestDelta([rect.minX, rect.midX, rect.maxX], xs, threshold)
         let (dy, hitY) = bestDelta([rect.minY, rect.midY, rect.maxY], ys, threshold)

@@ -515,6 +515,20 @@ private struct ImagePanel: View {
                 Spacer()
             }
 
+            Toggle("写真の比率を保つ", isOn: Binding(
+                get: { frame.keepsPhotoAspect },
+                set: { newValue in
+                    state.beginUndoGroup()
+                    state.updateSelected {
+                        if case .image(var f) = $0 { f.keepsPhotoAspect = newValue; $0 = .image(f) }
+                    }
+                    if newValue { state.fitSelectedToPhotoAspect() }
+                }))
+                .font(.system(size: 11))
+            Text("入れると、大きさを変えても写真の形のまま。切り取られません。")
+                .font(.system(size: 10)).foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
             SliderRow(label: "拡大率", value: Binding(
                 get: { Double(frame.contentScale) * 100 },
                 set: { newValue in

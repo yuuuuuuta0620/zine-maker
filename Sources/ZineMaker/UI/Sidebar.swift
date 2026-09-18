@@ -183,7 +183,8 @@ struct TemplatePicker: View {
 
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 10)], spacing: 10) {
-                    ForEach(LayoutTemplate.suggestions(for: max(photoCount, 1))) { template in
+                    ForEach(LayoutTemplate.suggestions(for: max(photoCount, 1),
+                                                       bleedFirst: state.settings.kind == .board)) { template in
                         Button {
                             if mode == .thisBoard { state.applyTemplate(template) }
                             else { state.autoFlow(template: template) }
@@ -193,6 +194,7 @@ struct TemplatePicker: View {
                                 TemplateGlyph(template: template, aspect: state.settings.trimBox.size.aspect)
                                     .frame(height: 58)
                                 Text(template.name).font(.system(size: 10))
+                                    .lineLimit(1).minimumScaleFactor(0.8)
                                 Text("\(template.count)枚")
                                     .font(.system(size: 9).monospacedDigit())
                                     .foregroundStyle(.tertiary)
@@ -227,14 +229,16 @@ struct TemplateGlyph: View {
                     .fill(Color.primary.opacity(0.06))
                     .frame(width: boxW, height: boxH)
                     .offset(x: ox, y: oy)
+                // 端まで使う型は隙間なしで、そう見えるように描く
+                let gap: CGFloat = template.bleed ? 0.5 : 1.5
                 ForEach(Array(template.slots.enumerated()), id: \.offset) { _, slot in
-                    RoundedRectangle(cornerRadius: 1.5)
+                    RoundedRectangle(cornerRadius: template.bleed ? 0.5 : 1.5)
                         .fill(Color.accentColor.opacity(0.55))
-                        .frame(width: max(slot.width * boxW - 1.5, 1),
-                               height: max(slot.height * boxH - 1.5, 1))
+                        .frame(width: max(slot.width * boxW - gap, 1),
+                               height: max(slot.height * boxH - gap, 1))
                         // slots は y-up、SwiftUI は y-down なので上下を入れ替える
-                        .offset(x: ox + slot.minX * boxW + 0.75,
-                                y: oy + (1 - slot.maxY) * boxH + 0.75)
+                        .offset(x: ox + slot.minX * boxW + gap / 2,
+                                y: oy + (1 - slot.maxY) * boxH + gap / 2)
                 }
             }
         }

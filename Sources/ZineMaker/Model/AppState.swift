@@ -45,7 +45,9 @@ final class AppState: ObservableObject, Identifiable {
 
     /// 作品番号・ページ番号・作品一覧を含む、ドキュメント全体を見た文脈
     var documentContext: DocumentContext {
-        DocumentContext(settings: settings, meta: meta, series: series, assets: assets, boards: boards)
+        var ctx = DocumentContext(settings: settings, meta: meta, series: series, assets: assets, boards: boards)
+        ctx.indexTemplate = settings.indexTemplate
+        return ctx
     }
 
     /// 現在のページを描くための文脈

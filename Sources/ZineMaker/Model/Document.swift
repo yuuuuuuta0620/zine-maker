@@ -71,6 +71,9 @@ struct DocSettings: Codable, Equatable {
 
     var background: RGBA = .white
 
+    /// 作品一覧（{index}）の1行の書き方。書類ごとに変えられる。
+    var indexTemplate: String = "{plate}　{title}"
+
     /// 全ページの下に敷く共通要素（罫線・ノンブルなど）。ページ側で個別に外せる。
     var masterElements: [Element] = []
 
@@ -194,6 +197,7 @@ struct DocSettings: Codable, Equatable {
         aspect           = c.value(.aspect, .portrait45)
         boardLongEdge    = c.value(.boardLongEdge, 2048)
         boardPaddingPct  = c.value(.boardPaddingPct, 3)
+        indexTemplate    = c.value(.indexTemplate, "{plate}　{title}")
         boardGutterPct   = c.value(.boardGutterPct, 1.5)
         background       = c.value(.background, .white)
         verticalGuides   = c.value(.verticalGuides, [])

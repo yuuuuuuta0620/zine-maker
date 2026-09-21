@@ -70,9 +70,10 @@ enum BookLayouts {
         f.fontName = "HiraMinProN-W3"
         f.fontSize = 3.4 * unit(s)
         f.alignment = align
-        f.lineHeightScale = 1.8
+        f.lineHeightScale = 1.6
         f.color = ink(s)
-        f.fontSize = CanvasRenderer.fittedFontSize(for: f, scene: scene)
+        // 6pt を下回ると紙では読めないので、そこで止める（入らなければ枠の方を直す）
+        f.fontSize = CanvasRenderer.fittedFontSize(for: f, scene: scene, minimum: Pt.fromMM(2.2))
         return .text(f)
     }
 
@@ -262,13 +263,14 @@ enum BookLayouts {
     static func overlap(_ s: DocSettings, _ big: UUID?, _ small: UUID?,
                         scene: CanvasRenderer.Scene = .init()) -> Artboard {
         var b = Artboard(role: .content)
-        let trim = s.trimBox
-        let bigRect = CGRect(x: trim.minX, y: trim.minY + trim.height * 0.10,
-                             width: trim.width * 0.66, height: trim.height * 0.80)
+        let trim = s.trimBox, media = s.mediaBox
+        // 左は紙の端に接するので、塗り足しまで伸ばす
+        let bigRect = CGRect(x: media.minX, y: trim.minY + trim.height * 0.10,
+                             width: trim.minX - media.minX + trim.width * 0.66, height: trim.height * 0.80)
         b.elements.append(photo(bigRect, big, fit: .fill))
         // 小さい方を右下に、大きい方へ少し掛ける
         let sw = trim.width * 0.30, sh = sw * 0.72
-        let smallRect = CGRect(x: bigRect.maxX - sw * 0.28, y: trim.minY + trim.height * 0.06,
+        let smallRect = CGRect(x: bigRect.maxX - sw * 0.28, y: trim.minY + trim.height * 0.125,
                                width: sw, height: sh)
         var sf = ImageFrame(rect: smallRect)
         sf.assetID = small
@@ -276,8 +278,10 @@ enum BookLayouts {
         sf.strokeWidth = unit(s) * 1.4
         sf.strokeColor = s.background       // 紙色の縁で浮かせる
         b.elements.append(.image(sf))
+        // 撮影データは小さい写真の真下。かぶらない高さだけ取る。
         b.elements.append(plateCaption(CGRect(x: smallRect.minX, y: trim.minY + trim.height * 0.012,
-                                              width: sw, height: trim.height * 0.042),
+                                              width: trim.maxX - smallRect.minX,
+                                              height: smallRect.minY - trim.minY - trim.height * 0.024),
                                        assetID: small, s: s, align: .left, scene: scene))
         return b
     }

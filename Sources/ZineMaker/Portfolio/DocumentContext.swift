@@ -86,7 +86,7 @@ struct DocumentContext {
         }
         // 作品一覧の行は、実際に {index} を使うページでだけ組み立てる
         if boards.indices.contains(index),
-           boards[index].elements.contains(where: { $0.textFrame?.template?.contains("{index}") == true }) {
+           boards[index].elements.contains(where: { $0.textFrame?.template?.contains("{index") == true }) {
             caption.indexLines = indexLines(template: indexTemplate)
         }
         return CanvasRenderer.Scene(assets: assetIndex, caption: caption)
@@ -99,7 +99,7 @@ struct DocumentContext {
         let index = assetIndex
         let total = totalPages
         let lines = boards.contains(where: { b in
-            b.elements.contains { $0.textFrame?.template?.contains("{index}") == true }
+            b.elements.contains { $0.textFrame?.template?.contains("{index") == true }
         }) ? indexLines(template: indexTemplate) : []
 
         return boards.indices.map { i in

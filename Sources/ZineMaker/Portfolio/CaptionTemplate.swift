@@ -54,6 +54,8 @@ enum CaptionTemplate {
         .init(key: "page.recto.pad", label: "見開きの右ページ番号（0埋め）"),
         .init(key: "pages",        label: "総ページ数"),
         .init(key: "index",        label: "作品一覧（自動生成）"),
+        .init(key: "index.1",      label: "作品一覧の前半"),
+        .init(key: "index.2",      label: "作品一覧の後半"),
     ]
 
     static var allTokens: [Token] { photoTokens + documentTokens }
@@ -154,6 +156,10 @@ enum CaptionTemplate {
         values["page.recto.pad"] = String(format: "%02d", recto)
         values["pages"] = "\(context.totalPages)"
         values["index"] = context.indexLines.joined(separator: "\n")
+        // 点数が多くて1ページに入らないとき、前半と後半に分ける
+        let half = (context.indexLines.count + 1) / 2
+        values["index.1"] = context.indexLines.prefix(half).joined(separator: "\n")
+        values["index.2"] = context.indexLines.dropFirst(half).joined(separator: "\n")
 
         var result = template
         for (key, value) in values {
